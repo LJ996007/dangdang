@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import {
   BarChart3,
@@ -12,6 +12,7 @@ import {
   List,
   Milk,
   Moon,
+  Pencil,
   ShieldCheck,
   Sunrise,
   Toilet,
@@ -47,7 +48,14 @@ import {
   parseDateInput,
   sortEvents,
 } from './analytics'
-import { addEvent, clearEvents, deleteEvent, getEvents, replaceEvents } from './db'
+import {
+  addEvent,
+  clearEvents,
+  deleteEvent,
+  getEvents,
+  replaceEvents,
+  updateEventTimestamp,
+} from './db'
 import type { BabyEvent, BabyEventType, ImportPayload } from './types'
 
 type TabId = 'record' | 'analysis' | 'data'
@@ -286,9 +294,11 @@ function Timeline({
 function RecentEvents({
   events,
   onDelete,
+  onEdit,
 }: {
   events: BabyEvent[]
   onDelete: (event: BabyEvent) => void
+  onEdit: (event: BabyEvent) => void
 }) {
   const recent = sortEvents(events).reverse().slice(0, 8)
 
@@ -320,19 +330,118 @@ function RecentEvents({
               <span>{format(timestamp, 'MM月dd日 HH:mm')}</span>
             </div>
             {event.id != null && (
-              <button
-                className="delete-event-button"
-                type="button"
-                aria-label={`删除${eventLabels[event.type]}记录`}
-                onClick={() => onDelete(event)}
-              >
-                <Trash2 aria-hidden="true" size={16} />
-              </button>
+              <div className="event-row-actions">
+                <button
+                  className="edit-event-button"
+                  type="button"
+                  aria-label={`修改${eventLabels[event.type]}记录的时间`}
+                  onClick={() => onEdit(event)}
+                >
+                  <Pencil aria-hidden="true" size={16} />
+                </button>
+                <button
+                  className="delete-event-button"
+                  type="button"
+                  aria-label={`删除${eventLabels[event.type]}记录`}
+                  onClick={() => onDelete(event)}
+                >
+                  <Trash2 aria-hidden="true" size={16} />
+                </button>
+              </div>
             )}
           </article>
         )
       })}
     </section>
+  )
+}
+
+function EditTimeModal({
+  event,
+  onClose,
+  onSave,
+}: {
+  event: BabyEvent
+  onClose: () => void
+  onSave: (newTimestamp: Date) => void
+}) {
+  const originalDate = useMemo(() => new Date(event.timestamp), [event.timestamp])
+  const initialMinutes = originalDate.getHours() * 60 + originalDate.getMinutes()
+  const [minutes, setMinutes] = useState(initialMinutes)
+
+  const previewDate = useMemo(() => {
+    const next = new Date(originalDate)
+    next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0)
+    return next
+  }, [minutes, originalDate])
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="修改记录时间"
+      onClick={onClose}
+    >
+      <div
+        className="modal-content"
+        onClick={(clickEvent) => clickEvent.stopPropagation()}
+      >
+        <header className="modal-header">
+          <span className={`event-icon ${eventTone[event.type]}`}>
+            {createElement(getEventIcon(event.type), {
+              'aria-hidden': true,
+              size: 18,
+            })}
+          </span>
+          <div>
+            <strong>修改时间</strong>
+            <span>{eventLabels[event.type]}</span>
+          </div>
+        </header>
+
+        <div className="time-preview">
+          <span>调整后时间</span>
+          <strong>{format(previewDate, 'HH:mm')}</strong>
+          <small>
+            {format(previewDate, 'MM月dd日')}（原 {format(originalDate, 'HH:mm')}）
+          </small>
+        </div>
+
+        <input
+          className="time-slider"
+          type="range"
+          min={0}
+          max={1439}
+          step={1}
+          value={minutes}
+          aria-label="拖动调整时间"
+          onChange={(changeEvent) =>
+            setMinutes(Number(changeEvent.target.value))
+          }
+        />
+        <div className="time-slider-scale" aria-hidden="true">
+          <span>00:00</span>
+          <span>06:00</span>
+          <span>12:00</span>
+          <span>18:00</span>
+          <span>24:00</span>
+        </div>
+
+        <div className="modal-actions">
+          <button type="button" className="modal-cancel" onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="modal-save"
+            onClick={() => onSave(previewDate)}
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -344,6 +453,7 @@ function App() {
   )
   const [now, setNow] = useState(() => new Date())
   const [notice, setNotice] = useState('数据只保存在这台手机的浏览器里')
+  const [editingEvent, setEditingEvent] = useState<BabyEvent | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const refreshEvents = useCallback(async () => {
@@ -518,6 +628,24 @@ function App() {
     setNotice('已删除单条记录')
   }
 
+  const handleEditEvent = (event: BabyEvent) => {
+    if (event.id == null) {
+      return
+    }
+    setEditingEvent(event)
+  }
+
+  const handleSaveEditedEvent = async (newTimestamp: Date) => {
+    if (!editingEvent || editingEvent.id == null) {
+      return
+    }
+
+    await updateEventTimestamp(editingEvent.id, newTimestamp)
+    setEditingEvent(null)
+    await refreshEvents()
+    setNotice(`已将时间修改为 ${format(newTimestamp, 'HH:mm')}`)
+  }
+
   const lastFeedTime = lastFeed ? new Date(lastFeed.timestamp) : null
   const currentSleepDuration = currentSleepStart
     ? formatDuration(Math.max(0, Math.round((now.getTime() - currentSleepStart.getTime()) / 60000)))
@@ -665,7 +793,11 @@ function App() {
             </article>
           </section>
 
-          <RecentEvents events={events} onDelete={handleDeleteEvent} />
+          <RecentEvents
+            events={events}
+            onDelete={handleDeleteEvent}
+            onEdit={handleEditEvent}
+          />
         </section>
       )}
 
@@ -853,7 +985,11 @@ function App() {
             </button>
           </section>
 
-          <RecentEvents events={events} onDelete={handleDeleteEvent} />
+          <RecentEvents
+            events={events}
+            onDelete={handleDeleteEvent}
+            onEdit={handleEditEvent}
+          />
         </section>
       )}
 
@@ -871,6 +1007,14 @@ function App() {
           </button>
         ))}
       </nav>
+
+      {editingEvent && (
+        <EditTimeModal
+          event={editingEvent}
+          onClose={() => setEditingEvent(null)}
+          onSave={handleSaveEditedEvent}
+        />
+      )}
     </main>
   )
 }

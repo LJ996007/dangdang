@@ -47,6 +47,10 @@ export async function deleteEvent(id: number) {
   await db.events.delete(id)
 }
 
+export async function updateEventTimestamp(id: number, timestamp: Date) {
+  await db.events.update(id, { timestamp: timestamp.toISOString() })
+}
+
 export async function clearEvents() {
   await db.events.clear()
 }
