@@ -1,4 +1,11 @@
-export type BabyEventType = 'sleep_start' | 'sleep_end' | 'feed' | 'poop' | 'pee'
+export type BabyEventType =
+  | 'sleep_start'
+  | 'sleep_end'
+  | 'feed'
+  | 'feed_start'
+  | 'feed_end'
+  | 'poop'
+  | 'pee'
 
 export interface BabyEvent {
   id?: number

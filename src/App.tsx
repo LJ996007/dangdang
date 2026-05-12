@@ -18,6 +18,7 @@ import {
   Trash2,
   Upload,
   Droplets,
+  type LucideIcon,
 } from 'lucide-react'
 import {
   Bar,
@@ -31,10 +32,12 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  buildFeedSessions,
   buildSleepSessions,
   formatDuration,
   formatSince,
   getCsvRows,
+  getCurrentFeedStart,
   getCurrentSleepStart,
   getDayStats,
   getExportFileStamp,
@@ -44,21 +47,23 @@ import {
   parseDateInput,
   sortEvents,
 } from './analytics'
-import { addEvent, clearEvents, getEvents, replaceEvents } from './db'
+import { addEvent, clearEvents, deleteEvent, getEvents, replaceEvents } from './db'
 import type { BabyEvent, BabyEventType, ImportPayload } from './types'
 
 type TabId = 'record' | 'analysis' | 'data'
 
-const tabs: Array<{ id: TabId; label: string; Icon: typeof Home }> = [
+const tabs: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
   { id: 'record', label: '记录', Icon: Home },
   { id: 'analysis', label: '分析', Icon: BarChart3 },
   { id: 'data', label: '数据', Icon: Database },
 ]
 
 const eventLabels: Record<BabyEventType, string> = {
-  sleep_start: '睡觉',
-  sleep_end: '醒了',
+  sleep_start: '睡觉开始',
+  sleep_end: '睡觉结束',
   feed: '吃奶',
+  feed_start: '吃奶开始',
+  feed_end: '吃奶结束',
   poop: '便便',
   pee: '尿泡',
 }
@@ -67,12 +72,14 @@ const eventTone: Record<BabyEventType, string> = {
   sleep_start: 'sleep',
   sleep_end: 'wake',
   feed: 'feed',
+  feed_start: 'feed',
+  feed_end: 'feed',
   poop: 'poop',
   pee: 'pee',
 }
 
 function getEventIcon(type: BabyEventType) {
-  if (type === 'feed') {
+  if (type === 'feed' || type === 'feed_start' || type === 'feed_end') {
     return Milk
   }
 
@@ -100,6 +107,8 @@ function isBabyEvent(value: unknown): value is BabyEvent {
     (type === 'sleep_start' ||
       type === 'sleep_end' ||
       type === 'feed' ||
+      type === 'feed_start' ||
+      type === 'feed_end' ||
       type === 'poop' ||
       type === 'pee') &&
     typeof timestamp === 'string' &&
@@ -148,6 +157,44 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   )
 }
 
+function SplitAction({
+  className,
+  icon: Icon,
+  title,
+  activeText,
+  startDisabled,
+  endDisabled,
+  onStart,
+  onEnd,
+}: {
+  className: string
+  icon: LucideIcon
+  title: string
+  activeText: string
+  startDisabled: boolean
+  endDisabled: boolean
+  onStart: () => void
+  onEnd: () => void
+}) {
+  return (
+    <div className={`quick-action split-card ${className}`}>
+      <div className="split-card-header">
+        <Icon aria-hidden="true" size={28} />
+        <span>{title}</span>
+        <small>{activeText}</small>
+      </div>
+      <div className="split-buttons">
+        <button type="button" disabled={startDisabled} onClick={onStart}>
+          开始
+        </button>
+        <button type="button" disabled={endDisabled} onClick={onEnd}>
+          结束
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Timeline({
   stats,
 }: {
@@ -189,6 +236,16 @@ function Timeline({
               )}`}
             />
           ))}
+          {stats.feedSegments.map((segment, index) => (
+            <span
+              className={`feed-segment ${segment.active ? 'active' : ''}`}
+              key={`feed-segment-${segment.startLabel}-${segment.endLabel}-${index}`}
+              style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
+              title={`吃奶 ${segment.startLabel}-${segment.endLabel} ${formatDuration(
+                segment.minutes,
+              )}`}
+            />
+          ))}
           {stats.feedMarkers.map((marker, index) => (
             <span
               className="event-marker feed-marker"
@@ -226,7 +283,13 @@ function Timeline({
   )
 }
 
-function RecentEvents({ events }: { events: BabyEvent[] }) {
+function RecentEvents({
+  events,
+  onDelete,
+}: {
+  events: BabyEvent[]
+  onDelete: (event: BabyEvent) => void
+}) {
   const recent = sortEvents(events).reverse().slice(0, 8)
 
   if (recent.length === 0) {
@@ -256,6 +319,16 @@ function RecentEvents({ events }: { events: BabyEvent[] }) {
               <strong>{eventLabels[event.type]}</strong>
               <span>{format(timestamp, 'MM月dd日 HH:mm')}</span>
             </div>
+            {event.id != null && (
+              <button
+                className="delete-event-button"
+                type="button"
+                aria-label={`删除${eventLabels[event.type]}记录`}
+                onClick={() => onDelete(event)}
+              >
+                <Trash2 aria-hidden="true" size={16} />
+              </button>
+            )}
           </article>
         )
       })}
@@ -304,6 +377,10 @@ function App() {
     () => getCurrentSleepStart(events),
     [events],
   )
+  const currentFeedStart = useMemo(
+    () => getCurrentFeedStart(events),
+    [events],
+  )
   const dayStats = useMemo(
     () => getDayStats(events, selectedDay, now),
     [events, now, selectedDay],
@@ -325,16 +402,32 @@ function App() {
     () => buildSleepSessions(events, now),
     [events, now],
   )
+  const feedSessions = useMemo(
+    () => buildFeedSessions(events, now),
+    [events, now],
+  )
 
-  const handleSleepToggle = async () => {
-    await addEvent(currentSleepStart ? 'sleep_end' : 'sleep_start')
-    setNotice(currentSleepStart ? '已记录醒来时间' : '已记录睡觉开始时间')
+  const handleSleepStart = async () => {
+    await addEvent('sleep_start')
+    setNotice('已记录睡觉开始时间')
     await refreshEvents()
   }
 
-  const handleFeed = async () => {
-    await addEvent('feed')
-    setNotice('已记录吃奶时间')
+  const handleSleepEnd = async () => {
+    await addEvent('sleep_end')
+    setNotice('已记录睡觉结束时间')
+    await refreshEvents()
+  }
+
+  const handleFeedStart = async () => {
+    await addEvent('feed_start')
+    setNotice('已记录吃奶开始时间')
+    await refreshEvents()
+  }
+
+  const handleFeedEnd = async () => {
+    await addEvent('feed_end')
+    setNotice('已记录吃奶结束时间')
     await refreshEvents()
   }
 
@@ -410,9 +503,27 @@ function App() {
     setNotice('已清空本机记录')
   }
 
+  const handleDeleteEvent = async (event: BabyEvent) => {
+    if (event.id == null) {
+      return
+    }
+
+    const timestamp = format(new Date(event.timestamp), 'MM月dd日 HH:mm')
+    if (!window.confirm(`确定删除「${eventLabels[event.type]} ${timestamp}」吗？`)) {
+      return
+    }
+
+    await deleteEvent(event.id)
+    await refreshEvents()
+    setNotice('已删除单条记录')
+  }
+
   const lastFeedTime = lastFeed ? new Date(lastFeed.timestamp) : null
   const currentSleepDuration = currentSleepStart
     ? formatDuration(Math.max(0, Math.round((now.getTime() - currentSleepStart.getTime()) / 60000)))
+    : null
+  const currentFeedDuration = currentFeedStart
+    ? formatDuration(Math.max(0, Math.round((now.getTime() - currentFeedStart.getTime()) / 60000)))
     : null
 
   return (
@@ -434,10 +545,14 @@ function App() {
           <strong>{currentSleepStart ? '正在睡觉中' : '正在清醒'}</strong>
         </div>
         <div>
-          <span>{currentSleepStart ? '已睡' : '上次吃奶'}</span>
+          <span>
+            {currentSleepStart ? '已睡' : currentFeedStart ? '正在吃奶' : '上次吃奶'}
+          </span>
           <strong>
             {currentSleepStart
               ? currentSleepDuration
+              : currentFeedStart
+                ? currentFeedDuration
               : formatSince(lastFeedTime, now)}
           </strong>
         </div>
@@ -446,28 +561,34 @@ function App() {
       {activeTab === 'record' && (
         <section className="screen">
           <div className="action-grid">
-            <button
-              className={`quick-action sleep ${currentSleepStart ? 'is-active' : ''}`}
-              type="button"
-              onClick={handleSleepToggle}
-            >
-              {currentSleepStart ? (
-                <Sunrise aria-hidden="true" size={30} />
-              ) : (
-                <Moon aria-hidden="true" size={30} />
-              )}
-              <span>{currentSleepStart ? '醒了' : '睡觉'}</span>
-              <small>
-                {currentSleepStart
-                  ? `开始于 ${format(currentSleepStart, 'HH:mm')}`
-                  : '点击自动记录当前时间'}
-              </small>
-            </button>
-            <button className="quick-action feed" type="button" onClick={handleFeed}>
-              <Milk aria-hidden="true" size={30} />
-              <span>吃奶</span>
-              <small>点击自动记录当前时间</small>
-            </button>
+            <SplitAction
+              className={`sleep ${currentSleepStart ? 'is-active' : ''}`}
+              icon={currentSleepStart ? Sunrise : Moon}
+              title="睡觉"
+              activeText={
+                currentSleepStart
+                  ? `已睡 ${currentSleepDuration ?? '--'}`
+                  : '记录开始和结束'
+              }
+              startDisabled={Boolean(currentSleepStart)}
+              endDisabled={!currentSleepStart}
+              onStart={handleSleepStart}
+              onEnd={handleSleepEnd}
+            />
+            <SplitAction
+              className={`feed ${currentFeedStart ? 'is-active' : ''}`}
+              icon={Milk}
+              title="吃奶"
+              activeText={
+                currentFeedStart
+                  ? `已吃 ${currentFeedDuration ?? '--'}`
+                  : '记录开始和结束'
+              }
+              startDisabled={Boolean(currentFeedStart)}
+              endDisabled={!currentFeedStart}
+              onStart={handleFeedStart}
+              onEnd={handleFeedEnd}
+            />
             <button className="quick-action poop" type="button" onClick={handlePoop}>
               <Toilet aria-hidden="true" size={30} />
               <span>便便</span>
@@ -492,6 +613,10 @@ function App() {
             <article className="metric">
               <span>吃奶次数</span>
               <strong>{todayStats.feedEvents.length}</strong>
+            </article>
+            <article className="metric">
+              <span>吃奶总时长</span>
+              <strong>{formatDuration(todayStats.totalFeedMinutes)}</strong>
             </article>
             <article className="metric">
               <span>便便次数</span>
@@ -534,11 +659,13 @@ function App() {
             <article>
               <span>记录总数</span>
               <strong>{events.length}</strong>
-              <small>{sleepSessions.length} 段睡眠</small>
+              <small>
+                {sleepSessions.length} 段睡眠 / {feedSessions.length} 段吃奶
+              </small>
             </article>
           </section>
 
-          <RecentEvents events={events} />
+          <RecentEvents events={events} onDelete={handleDeleteEvent} />
         </section>
       )}
 
@@ -561,6 +688,10 @@ function App() {
             <article className="metric">
               <span>吃奶次数</span>
               <strong>{dayStats.feedEvents.length}</strong>
+            </article>
+            <article className="metric">
+              <span>吃奶总时长</span>
+              <strong>{formatDuration(dayStats.totalFeedMinutes)}</strong>
             </article>
             <article className="metric">
               <span>便便次数</span>
@@ -690,7 +821,14 @@ function App() {
               </article>
               <article className="metric">
                 <span>喂奶</span>
-                <strong>{events.filter((event) => event.type === 'feed').length}</strong>
+                <strong>
+                  {
+                    events.filter(
+                      (event) =>
+                        event.type === 'feed' || event.type === 'feed_start',
+                    ).length
+                  }
+                </strong>
               </article>
               <article className="metric">
                 <span>便便</span>
@@ -704,6 +842,10 @@ function App() {
                 <span>睡眠段</span>
                 <strong>{sleepSessions.length}</strong>
               </article>
+              <article className="metric">
+                <span>吃奶段</span>
+                <strong>{feedSessions.length}</strong>
+              </article>
             </div>
             <button className="danger-button" type="button" onClick={handleClear}>
               <Trash2 aria-hidden="true" size={18} />
@@ -711,7 +853,7 @@ function App() {
             </button>
           </section>
 
-          <RecentEvents events={events} />
+          <RecentEvents events={events} onDelete={handleDeleteEvent} />
         </section>
       )}
 

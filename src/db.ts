@@ -43,6 +43,10 @@ export async function replaceEvents(events: BabyEvent[]) {
   })
 }
 
+export async function deleteEvent(id: number) {
+  await db.events.delete(id)
+}
+
 export async function clearEvents() {
   await db.events.clear()
 }

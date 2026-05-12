@@ -14,7 +14,13 @@ export interface SleepSession {
   complete: boolean
 }
 
-export interface SleepSegment {
+export interface ActivitySession {
+  start: Date
+  end: Date
+  complete: boolean
+}
+
+export interface TimelineSegment {
   left: number
   width: number
   startLabel: string
@@ -43,10 +49,14 @@ export interface DayStats {
   peeMarkers: FeedMarker[]
   feedIntervals: IntervalPoint[]
   sleepSegments: SleepSegment[]
+  feedSegments: TimelineSegment[]
   sleepCount: number
   totalSleepMinutes: number
+  totalFeedMinutes: number
   averageFeedIntervalMinutes: number | null
 }
+
+export type SleepSegment = TimelineSegment
 
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -57,24 +67,43 @@ export function sortEvents(events: BabyEvent[]) {
   )
 }
 
-export function getCurrentSleepStart(events: BabyEvent[]) {
-  const lastSleep = sortEvents(events)
-    .filter((event) => event.type === 'sleep_start' || event.type === 'sleep_end')
+export function getCurrentPairStart(
+  events: BabyEvent[],
+  startType: BabyEvent['type'],
+  endType: BabyEvent['type'],
+) {
+  const lastPairEvent = sortEvents(events)
+    .filter((event) => event.type === startType || event.type === endType)
     .at(-1)
 
-  return lastSleep?.type === 'sleep_start' ? new Date(lastSleep.timestamp) : null
+  return lastPairEvent?.type === startType
+    ? new Date(lastPairEvent.timestamp)
+    : null
 }
 
-export function buildSleepSessions(events: BabyEvent[], now = new Date()) {
-  const sessions: SleepSession[] = []
+export function getCurrentSleepStart(events: BabyEvent[]) {
+  return getCurrentPairStart(events, 'sleep_start', 'sleep_end')
+}
+
+export function getCurrentFeedStart(events: BabyEvent[]) {
+  return getCurrentPairStart(events, 'feed_start', 'feed_end')
+}
+
+export function buildPairSessions(
+  events: BabyEvent[],
+  startType: BabyEvent['type'],
+  endType: BabyEvent['type'],
+  now = new Date(),
+) {
+  const sessions: ActivitySession[] = []
   let openStart: Date | null = null
 
   for (const event of sortEvents(events)) {
-    if (event.type === 'sleep_start') {
+    if (event.type === startType) {
       openStart = new Date(event.timestamp)
     }
 
-    if (event.type === 'sleep_end' && openStart) {
+    if (event.type === endType && openStart) {
       const end = new Date(event.timestamp)
       if (end > openStart) {
         sessions.push({ start: openStart, end, complete: true })
@@ -88,6 +117,14 @@ export function buildSleepSessions(events: BabyEvent[], now = new Date()) {
   }
 
   return sessions
+}
+
+export function buildSleepSessions(events: BabyEvent[], now = new Date()) {
+  return buildPairSessions(events, 'sleep_start', 'sleep_end', now) as SleepSession[]
+}
+
+export function buildFeedSessions(events: BabyEvent[], now = new Date()) {
+  return buildPairSessions(events, 'feed_start', 'feed_end', now)
 }
 
 export function getDayStats(
@@ -116,11 +153,14 @@ export function getDayStats(
   }
 
   const dayEvents = sortEvents(events).filter(isInDay)
-  const feedEvents = dayEvents.filter((event) => event.type === 'feed')
+  const feedEvents = dayEvents.filter(
+    (event) => event.type === 'feed' || event.type === 'feed_start',
+  )
+  const legacyFeedEvents = dayEvents.filter((event) => event.type === 'feed')
   const poopEvents = dayEvents.filter((event) => event.type === 'poop')
   const peeEvents = dayEvents.filter((event) => event.type === 'pee')
 
-  const feedMarkers = feedEvents.map(toMarker)
+  const feedMarkers = legacyFeedEvents.map(toMarker)
   const poopMarkers = poopEvents.map(toMarker)
   const peeMarkers = peeEvents.map(toMarker)
 
@@ -141,30 +181,43 @@ export function getDayStats(
         )
       : null
 
+  const toTimelineSegment = (session: ActivitySession) => {
+    const clippedStart = new Date(Math.max(session.start.getTime(), startMs))
+    const clippedEnd = new Date(Math.min(session.end.getTime(), endMs))
+
+    if (!isBefore(clippedStart, clippedEnd)) {
+      return null
+    }
+
+    const startMinutes = (clippedStart.getTime() - startMs) / 60000
+    const durationMinutes = (clippedEnd.getTime() - clippedStart.getTime()) / 60000
+
+    return {
+      left: (startMinutes / minutesInDay) * 100,
+      width: Math.max((durationMinutes / minutesInDay) * 100, 0.8),
+      startLabel: format(clippedStart, 'HH:mm'),
+      endLabel: format(clippedEnd, 'HH:mm'),
+      minutes: Math.round(durationMinutes),
+      active: !session.complete,
+    }
+  }
+
   const sleepSegments = buildSleepSessions(events, now)
-    .map((session) => {
-      const clippedStart = new Date(Math.max(session.start.getTime(), startMs))
-      const clippedEnd = new Date(Math.min(session.end.getTime(), endMs))
-
-      if (!isBefore(clippedStart, clippedEnd)) {
-        return null
-      }
-
-      const startMinutes = (clippedStart.getTime() - startMs) / 60000
-      const durationMinutes = (clippedEnd.getTime() - clippedStart.getTime()) / 60000
-
-      return {
-        left: (startMinutes / minutesInDay) * 100,
-        width: Math.max((durationMinutes / minutesInDay) * 100, 0.8),
-        startLabel: format(clippedStart, 'HH:mm'),
-        endLabel: format(clippedEnd, 'HH:mm'),
-        minutes: Math.round(durationMinutes),
-        active: !session.complete,
-      }
-    })
+    .map(toTimelineSegment)
     .filter((segment): segment is SleepSegment => Boolean(segment))
 
+  const feedSegments = buildFeedSessions(events, now)
+    .map((session) => {
+      const segment = toTimelineSegment(session)
+      return segment ? { ...segment, width: Math.max(segment.width, 1) } : null
+    })
+    .filter((segment): segment is TimelineSegment => Boolean(segment))
+
   const totalSleepMinutes = sleepSegments.reduce(
+    (sum, segment) => sum + segment.minutes,
+    0,
+  )
+  const totalFeedMinutes = feedSegments.reduce(
     (sum, segment) => sum + segment.minutes,
     0,
   )
@@ -184,8 +237,10 @@ export function getDayStats(
     peeMarkers,
     feedIntervals,
     sleepSegments,
+    feedSegments,
     sleepCount,
     totalSleepMinutes,
+    totalFeedMinutes,
     averageFeedIntervalMinutes,
   }
 }
@@ -203,7 +258,7 @@ export function getSevenDaySleep(events: BabyEvent[], now = new Date()) {
 
 export function getLastFeed(events: BabyEvent[]) {
   return sortEvents(events)
-    .filter((event) => event.type === 'feed')
+    .filter((event) => event.type === 'feed' || event.type === 'feed_start')
     .at(-1)
 }
 
@@ -260,6 +315,8 @@ export function getCsvRows(events: BabyEvent[]) {
     sleep_start: '睡觉',
     sleep_end: '醒了',
     feed: '吃奶',
+    feed_start: '吃奶开始',
+    feed_end: '吃奶结束',
     poop: '便便',
     pee: '尿泡',
   }

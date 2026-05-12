@@ -233,6 +233,11 @@ p {
   color: var(--coral-dark);
 }
 
+.quick-action.feed.is-active {
+  border-color: rgba(201, 74, 58, 0.28);
+  background: #ffe7e2;
+}
+
 .quick-action.poop {
   background: #fff6e5;
   color: var(--poop-dark);
@@ -241,6 +246,53 @@ p {
 .quick-action.pee {
   background: #edf7ff;
   color: var(--pee-dark);
+}
+
+.split-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.split-card-header {
+  display: grid;
+  width: 100%;
+  flex: 1 1 auto;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 13px 16px 8px;
+}
+
+.split-card-header small {
+  grid-column: 1 / -1;
+}
+
+.split-buttons {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid rgba(23, 33, 31, 0.08);
+}
+
+.split-buttons button {
+  min-height: 42px;
+  background: rgba(255, 255, 255, 0.45);
+  color: currentColor;
+  font-size: 15px;
+  font-weight: 780;
+}
+
+.split-buttons button + button {
+  border-left: 1px solid rgba(23, 33, 31, 0.08);
+}
+
+.split-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.split-buttons button:not(:disabled):active {
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .metric-grid {
@@ -371,6 +423,19 @@ p {
   background: var(--mint-dark);
 }
 
+.feed-segment {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  min-width: 5px;
+  border-radius: 999px;
+  background: rgba(242, 111, 94, 0.7);
+}
+
+.feed-segment.active {
+  background: var(--coral-dark);
+}
+
 .event-marker {
   position: absolute;
   width: 12px;
@@ -483,6 +548,23 @@ p {
   color: var(--ink);
   font-size: 15px;
   line-height: 1.2;
+}
+
+.event-row > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.delete-event-button {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #fff2f1;
+  color: var(--danger);
 }
 
 .date-toolbar {
