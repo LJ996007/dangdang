@@ -155,6 +155,39 @@ async function pushRemoteEvent(
   return insertRemoteEvent(client, payload)
 }
 
+async function pushLocalEvents(
+  client: SupabaseClient,
+  events: BabyEvent[],
+  userId: string,
+) {
+  const syncedEvents: Array<{
+    clientId: string
+    remoteId: string
+    updatedAt: string
+  }> = []
+  const failedMessages: string[] = []
+
+  for (const event of events) {
+    try {
+      const remoteEvent = await pushRemoteEvent(client, event, userId)
+      syncedEvents.push({
+        clientId: remoteEvent.client_id,
+        remoteId: remoteEvent.id,
+        updatedAt: remoteEvent.updated_at,
+      })
+    } catch (error) {
+      await markEventsSyncError([event.clientId])
+      failedMessages.push(
+        `${event.type} ${event.timestamp}: ${getErrorMessage(error)}`,
+      )
+    }
+  }
+
+  await markEventsSynced(syncedEvents)
+
+  return { syncedEvents, failedMessages }
+}
+
 function fromRemoteEvent(event: RemoteBabyEvent): BabyEvent {
   return {
     clientId: event.client_id,
@@ -185,32 +218,13 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
   let pushed = 0
 
   if (pendingEvents.length > 0) {
-    const syncedEvents: Array<{
-      clientId: string
-      remoteId: string
-      updatedAt: string
-    }> = []
-    const failedMessages: string[] = []
+    const { syncedEvents, failedMessages } = await pushLocalEvents(
+      supabase,
+      pendingEvents,
+      userId,
+    )
 
-    for (const event of pendingEvents) {
-      try {
-        const remoteEvent = await pushRemoteEvent(supabase, event, userId)
-        syncedEvents.push({
-          clientId: remoteEvent.client_id,
-          remoteId: remoteEvent.id,
-          updatedAt: remoteEvent.updated_at,
-        })
-      } catch (error) {
-        await markEventsSyncError([event.clientId])
-        failedMessages.push(
-          `${event.type} ${event.timestamp}: ${getErrorMessage(error)}`,
-        )
-      }
-    }
-
-    pushed = syncedEvents.length
-    await markEventsSynced(syncedEvents)
-
+    pushed += syncedEvents.length
     if (failedMessages.length > 0) {
       throw new Error(
         `有 ${failedMessages.length} 条记录上传失败：${failedMessages[0]}`,
@@ -234,8 +248,31 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
 
   await upsertRemoteEvents((remoteEvents ?? []).map(fromRemoteEvent))
 
-  const syncedAt =
-    remoteEvents?.at(-1)?.updated_at ?? new Date().toISOString()
+  const remoteClientIds = new Set(
+    (remoteEvents ?? []).map((event) => event.client_id),
+  )
+  const currentLocalEvents = await getAllEvents()
+  const missingRemoteEvents = currentLocalEvents.filter(
+    (event) =>
+      event.syncStatus === 'synced' && !remoteClientIds.has(event.clientId),
+  )
+
+  if (missingRemoteEvents.length > 0) {
+    const { syncedEvents, failedMessages } = await pushLocalEvents(
+      supabase,
+      missingRemoteEvents,
+      userId,
+    )
+
+    pushed += syncedEvents.length
+    if (failedMessages.length > 0) {
+      throw new Error(
+        `有 ${failedMessages.length} 条记录补传失败：${failedMessages[0]}`,
+      )
+    }
+  }
+
+  const syncedAt = new Date().toISOString()
   setLastSyncAt(syncedAt)
 
   return {
