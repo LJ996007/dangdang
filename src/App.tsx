@@ -27,6 +27,7 @@ import {
   Moon,
   Pencil,
   RefreshCw,
+  Scale,
   ShieldCheck,
   Sunrise,
   Toilet,
@@ -53,6 +54,7 @@ import {
   buildSleepSessions,
   formatDuration,
   formatSince,
+  formatWeightKg,
   getCsvRows,
   getCurrentFeedStart,
   getCurrentSleepStart,
@@ -60,18 +62,22 @@ import {
   getExportFileStamp,
   getLastCompletedSleep,
   getLastFeed,
+  getLatestWeight,
   getSevenDaySleep,
+  getWeightTrend,
+  isValidWeightKg,
   parseDateInput,
   sortEvents,
 } from './analytics'
 import {
   addEvent,
+  addWeightEvent,
   clearEvents,
   deleteEvent,
   getEvents,
   getPendingEventCount,
   replaceEvents,
-  updateEventTimestamp,
+  updateEventDetails,
 } from './db'
 import { isSupabaseConfigured, supabase } from './supabase'
 import { getLastSyncAt, syncEvents } from './sync'
@@ -93,6 +99,7 @@ const eventLabels: Record<BabyEventType, string> = {
   feed_end: '吃奶结束',
   poop: '便便',
   pee: '尿泡',
+  weight: '体重',
 }
 
 const eventTone: Record<BabyEventType, string> = {
@@ -103,6 +110,7 @@ const eventTone: Record<BabyEventType, string> = {
   feed_end: 'feed',
   poop: 'poop',
   pee: 'pee',
+  weight: 'weight',
 }
 
 function getEventIcon(type: BabyEventType) {
@@ -118,7 +126,28 @@ function getEventIcon(type: BabyEventType) {
     return Droplets
   }
 
+  if (type === 'weight') {
+    return Scale
+  }
+
   return type === 'sleep_start' ? Moon : Sunrise
+}
+
+function parseWeightInput(value: string) {
+  const normalized = Number(value.trim().replace(',', '.'))
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return null
+  }
+
+  return Math.round(normalized * 100) / 100
+}
+
+function getEventTitle(event: BabyEvent) {
+  if (event.type === 'weight' && isValidWeightKg(event.weightKg)) {
+    return `体重 ${formatWeightKg(event.weightKg)} kg`
+  }
+
+  return eventLabels[event.type]
 }
 
 function isBabyEvent(value: unknown): value is BabyEvent {
@@ -137,9 +166,11 @@ function isBabyEvent(value: unknown): value is BabyEvent {
       type === 'feed_start' ||
       type === 'feed_end' ||
       type === 'poop' ||
-      type === 'pee') &&
+      type === 'pee' ||
+      type === 'weight') &&
     typeof timestamp === 'string' &&
-    !Number.isNaN(new Date(timestamp).getTime())
+    !Number.isNaN(new Date(timestamp).getTime()) &&
+    (type !== 'weight' || isValidWeightKg(event.weightKg))
   )
 }
 
@@ -164,12 +195,14 @@ function downloadTextFile(filename: string, content: string, type: string) {
 
 function toCsv(events: BabyEvent[]) {
   const rows = getCsvRows(events)
-  const header = ['类型', 'ISO时间', '日期', '时间']
+  const header = ['类型', 'ISO时间', '日期', '时间', '体重kg']
   const escapeCell = (value: string) => `"${value.replaceAll('"', '""')}"`
   return [
     header.join(','),
     ...rows.map((row) =>
-      [row.类型, row.ISO时间, row.日期, row.时间].map(escapeCell).join(','),
+      [row.类型, row.ISO时间, row.日期, row.时间, row.体重kg]
+        .map(escapeCell)
+        .join(','),
     ),
   ].join('\n')
 }
@@ -219,6 +252,59 @@ function SplitAction({
         </button>
       </div>
     </div>
+  )
+}
+
+function WeightRecorder({
+  value,
+  latestWeight,
+  onChange,
+  onSubmit,
+}: {
+  value: string
+  latestWeight: BabyEvent | undefined
+  onChange: (value: string) => void
+  onSubmit: () => void
+}) {
+  const parsedWeight = parseWeightInput(value)
+
+  return (
+    <section className="weight-recorder" aria-label="体重记录">
+      <div className="section-title">
+        <Scale aria-hidden="true" size={18} />
+        <h2>体重</h2>
+      </div>
+      <div className="weight-form">
+        <label>
+          <span>本次体重</span>
+          <div className="weight-input-wrap">
+            <input
+              inputMode="decimal"
+              min="0"
+              placeholder="例如 4.25"
+              step="0.01"
+              type="number"
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+            />
+            <strong>kg</strong>
+          </div>
+        </label>
+        <button disabled={parsedWeight == null} type="button" onClick={onSubmit}>
+          <Scale aria-hidden="true" size={18} />
+          记录体重
+        </button>
+      </div>
+      <p>
+        最近：
+        {latestWeight && isValidWeightKg(latestWeight.weightKg)
+          ? `${formatWeightKg(latestWeight.weightKg)} kg · ${format(
+              new Date(latestWeight.timestamp),
+              'MM月dd日 HH:mm',
+            )}`
+          : '暂无体重记录'}
+      </p>
+    </section>
   )
 }
 
@@ -339,13 +425,14 @@ function RecentEvents({
       {recent.map((event) => {
         const Icon = getEventIcon(event.type)
         const timestamp = new Date(event.timestamp)
+        const title = getEventTitle(event)
         return (
           <article className="event-row" key={event.id ?? event.timestamp}>
             <span className={`event-icon ${eventTone[event.type]}`}>
               <Icon aria-hidden="true" size={18} />
             </span>
             <div>
-              <strong>{eventLabels[event.type]}</strong>
+              <strong>{title}</strong>
               <span>{format(timestamp, 'MM月dd日 HH:mm')}</span>
             </div>
             {event.id != null && (
@@ -353,7 +440,7 @@ function RecentEvents({
                 <button
                   className="edit-event-button"
                   type="button"
-                  aria-label={`修改${eventLabels[event.type]}记录的时间`}
+                  aria-label={`修改${title}记录`}
                   onClick={() => onEdit(event)}
                 >
                   <Pencil aria-hidden="true" size={16} />
@@ -361,7 +448,7 @@ function RecentEvents({
                 <button
                   className="delete-event-button"
                   type="button"
-                  aria-label={`删除${eventLabels[event.type]}记录`}
+                  aria-label={`删除${title}记录`}
                   onClick={() => onDelete(event)}
                 >
                   <Trash2 aria-hidden="true" size={16} />
@@ -375,18 +462,25 @@ function RecentEvents({
   )
 }
 
-function EditTimeModal({
+function EditEventModal({
   event,
   onClose,
   onSave,
 }: {
   event: BabyEvent
   onClose: () => void
-  onSave: (newTimestamp: Date) => void
+  onSave: (newTimestamp: Date, weightKg?: number) => void
 }) {
   const originalDate = useMemo(() => new Date(event.timestamp), [event.timestamp])
   const initialMinutes = originalDate.getHours() * 60 + originalDate.getMinutes()
   const [minutes, setMinutes] = useState(initialMinutes)
+  const [weightValue, setWeightValue] = useState(() =>
+    event.type === 'weight' && isValidWeightKg(event.weightKg)
+      ? formatWeightKg(event.weightKg)
+      : '',
+  )
+  const [weightError, setWeightError] = useState('')
+  const isWeightEvent = event.type === 'weight'
 
   const previewDate = useMemo(() => {
     const next = new Date(originalDate)
@@ -394,12 +488,27 @@ function EditTimeModal({
     return next
   }, [minutes, originalDate])
 
+  const handleSave = () => {
+    if (!isWeightEvent) {
+      onSave(previewDate)
+      return
+    }
+
+    const nextWeightKg = parseWeightInput(weightValue)
+    if (nextWeightKg == null) {
+      setWeightError('请输入有效的体重，单位 kg')
+      return
+    }
+
+    onSave(previewDate, nextWeightKg)
+  }
+
   return (
     <div
       className="modal-backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label="修改记录时间"
+      aria-label="修改记录"
       onClick={onClose}
     >
       <div
@@ -414,10 +523,28 @@ function EditTimeModal({
             })}
           </span>
           <div>
-            <strong>修改时间</strong>
-            <span>{eventLabels[event.type]}</span>
+            <strong>修改记录</strong>
+            <span>{getEventTitle(event)}</span>
           </div>
         </header>
+
+        {isWeightEvent && (
+          <label className="modal-field">
+            <span>体重（kg）</span>
+            <input
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              type="number"
+              value={weightValue}
+              onChange={(changeEvent) => {
+                setWeightValue(changeEvent.target.value)
+                setWeightError('')
+              }}
+            />
+            {weightError && <small>{weightError}</small>}
+          </label>
+        )}
 
         <div className="time-preview">
           <span>调整后时间</span>
@@ -454,7 +581,7 @@ function EditTimeModal({
           <button
             type="button"
             className="modal-save"
-            onClick={() => onSave(previewDate)}
+            onClick={handleSave}
           >
             保存
           </button>
@@ -634,6 +761,7 @@ function App() {
       ? '登录后可在不同设备间同步'
       : '未配置云同步，当前只保存在本机',
   )
+  const [weightInput, setWeightInput] = useState('')
   const [editingEvent, setEditingEvent] = useState<BabyEvent | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured)
@@ -809,6 +937,8 @@ function App() {
     () => getSevenDaySleep(events, now),
     [events, now],
   )
+  const weightTrend = useMemo(() => getWeightTrend(events), [events])
+  const latestWeight = useMemo(() => getLatestWeight(events), [events])
   const lastFeed = useMemo(() => getLastFeed(events), [events])
   const lastSleep = useMemo(
     () => getLastCompletedSleep(events, now),
@@ -921,6 +1051,19 @@ function App() {
     await finishLocalChange()
   }
 
+  const handleWeight = async () => {
+    const weightKg = parseWeightInput(weightInput)
+    if (weightKg == null) {
+      setNotice('请输入有效的体重，单位 kg')
+      return
+    }
+
+    await addWeightEvent(weightKg)
+    setWeightInput('')
+    setNotice(`已记录体重 ${formatWeightKg(weightKg)} kg`)
+    await finishLocalChange()
+  }
+
   const handleExportJson = () => {
     const payload: ImportPayload = {
       version: 1,
@@ -987,7 +1130,7 @@ function App() {
     }
 
     const timestamp = format(new Date(event.timestamp), 'MM月dd日 HH:mm')
-    if (!window.confirm(`确定删除「${eventLabels[event.type]} ${timestamp}」吗？`)) {
+    if (!window.confirm(`确定删除「${getEventTitle(event)} ${timestamp}」吗？`)) {
       return
     }
 
@@ -1003,14 +1146,24 @@ function App() {
     setEditingEvent(event)
   }
 
-  const handleSaveEditedEvent = async (newTimestamp: Date) => {
+  const handleSaveEditedEvent = async (
+    newTimestamp: Date,
+    weightKg?: number,
+  ) => {
     if (!editingEvent || editingEvent.id == null) {
       return
     }
 
-    await updateEventTimestamp(editingEvent.id, newTimestamp)
+    await updateEventDetails(editingEvent.id, {
+      timestamp: newTimestamp,
+      weightKg: editingEvent.type === 'weight' ? weightKg : undefined,
+    })
     setEditingEvent(null)
-    setNotice(`已将时间修改为 ${format(newTimestamp, 'HH:mm')}`)
+    setNotice(
+      editingEvent.type === 'weight' && weightKg != null
+        ? `已修改体重为 ${formatWeightKg(weightKg)} kg`
+        : `已将时间修改为 ${format(newTimestamp, 'HH:mm')}`,
+    )
     await finishLocalChange()
   }
 
@@ -1148,6 +1301,13 @@ function App() {
             </button>
           </div>
 
+          <WeightRecorder
+            latestWeight={latestWeight}
+            value={weightInput}
+            onChange={setWeightInput}
+            onSubmit={() => void handleWeight()}
+          />
+
           <div className="metric-grid" aria-label="今日汇总">
             <article className="metric">
               <span>睡眠次数</span>
@@ -1176,6 +1336,14 @@ function App() {
             <article className="metric">
               <span>平均间隔</span>
               <strong>{formatDuration(todayStats.averageFeedIntervalMinutes)}</strong>
+            </article>
+            <article className="metric">
+              <span>今日体重</span>
+              <strong>
+                {todayStats.weightEvents.at(-1)
+                  ? `${formatWeightKg(todayStats.weightEvents.at(-1)?.weightKg)} kg`
+                  : '--'}
+              </strong>
             </article>
           </div>
 
@@ -1264,6 +1432,18 @@ function App() {
               <span>睡眠总时长</span>
               <strong>{formatDuration(dayStats.totalSleepMinutes)}</strong>
             </article>
+            <article className="metric">
+              <span>体重记录</span>
+              <strong>{dayStats.weightEvents.length}</strong>
+            </article>
+            <article className="metric">
+              <span>当日最新体重</span>
+              <strong>
+                {dayStats.weightEvents.at(-1)
+                  ? `${formatWeightKg(dayStats.weightEvents.at(-1)?.weightKg)} kg`
+                  : '--'}
+              </strong>
+            </article>
           </div>
 
           <Timeline stats={dayStats} />
@@ -1320,6 +1500,44 @@ function App() {
                 <Bar dataKey="hours" fill="#61b7a6" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+          </section>
+
+          <section className="chart-panel">
+            <div className="section-title">
+              <Scale aria-hidden="true" size={18} />
+              <h2>体重趋势</h2>
+            </div>
+            {weightTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={weightTrend} margin={{ left: -18, right: 8 }}>
+                  <CartesianGrid stroke="#e8efed" strokeDasharray="4 4" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    unit="kg"
+                    width={58}
+                  />
+                  <Tooltip
+                    formatter={(value) => [`${value} kg`, '体重']}
+                    labelFormatter={(label) => `${label}`}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="weightKg"
+                    stroke="#6f63c5"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: '#6f63c5' }}
+                    activeDot={{ r: 6 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState
+                title="还没有体重趋势"
+                body="记录一次体重后，这里会按时间显示 kg 变化。"
+              />
+            )}
           </section>
         </section>
       )}
@@ -1400,6 +1618,20 @@ function App() {
                 <strong>{events.filter((event) => event.type === 'pee').length}</strong>
               </article>
               <article className="metric">
+                <span>体重</span>
+                <strong>
+                  {events.filter((event) => event.type === 'weight').length}
+                </strong>
+              </article>
+              <article className="metric">
+                <span>最新体重</span>
+                <strong>
+                  {latestWeight && isValidWeightKg(latestWeight.weightKg)
+                    ? `${formatWeightKg(latestWeight.weightKg)} kg`
+                    : '--'}
+                </strong>
+              </article>
+              <article className="metric">
                 <span>睡眠段</span>
                 <strong>{sleepSessions.length}</strong>
               </article>
@@ -1438,7 +1670,7 @@ function App() {
       </nav>
 
       {editingEvent && (
-        <EditTimeModal
+        <EditEventModal
           event={editingEvent}
           onClose={() => setEditingEvent(null)}
           onSave={handleSaveEditedEvent}

@@ -39,11 +39,17 @@ export interface IntervalPoint {
   minutes: number
 }
 
+export interface WeightPoint {
+  label: string
+  weightKg: number
+}
+
 export interface DayStats {
   date: Date
   feedEvents: BabyEvent[]
   poopEvents: BabyEvent[]
   peeEvents: BabyEvent[]
+  weightEvents: BabyEvent[]
   feedMarkers: FeedMarker[]
   poopMarkers: FeedMarker[]
   peeMarkers: FeedMarker[]
@@ -65,6 +71,41 @@ export function sortEvents(events: BabyEvent[]) {
     (a, b) =>
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   )
+}
+
+export function isValidWeightKg(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+export function formatWeightKg(value: number | null | undefined) {
+  if (!isValidWeightKg(value)) {
+    return '--'
+  }
+
+  return value.toLocaleString('zh-CN', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  })
+}
+
+export function getWeightEvents(events: BabyEvent[]) {
+  return sortEvents(events).filter(
+    (event) => event.type === 'weight' && isValidWeightKg(event.weightKg),
+  )
+}
+
+export function getLatestWeight(events: BabyEvent[]) {
+  return getWeightEvents(events).at(-1)
+}
+
+export function getWeightTrend(events: BabyEvent[]): WeightPoint[] {
+  return getWeightEvents(events).map((event) => {
+    const timestamp = new Date(event.timestamp)
+    return {
+      label: format(timestamp, 'MM/dd HH:mm'),
+      weightKg: event.weightKg!,
+    }
+  })
 }
 
 export function getCurrentPairStart(
@@ -159,6 +200,9 @@ export function getDayStats(
   const legacyFeedEvents = dayEvents.filter((event) => event.type === 'feed')
   const poopEvents = dayEvents.filter((event) => event.type === 'poop')
   const peeEvents = dayEvents.filter((event) => event.type === 'pee')
+  const weightEvents = dayEvents.filter(
+    (event) => event.type === 'weight' && isValidWeightKg(event.weightKg),
+  )
 
   const feedMarkers = legacyFeedEvents.map(toMarker)
   const poopMarkers = poopEvents.map(toMarker)
@@ -232,6 +276,7 @@ export function getDayStats(
     feedEvents,
     poopEvents,
     peeEvents,
+    weightEvents,
     feedMarkers,
     poopMarkers,
     peeMarkers,
@@ -319,6 +364,7 @@ export function getCsvRows(events: BabyEvent[]) {
     feed_end: '吃奶结束',
     poop: '便便',
     pee: '尿泡',
+    weight: '体重',
   }
 
   return sortEvents(events).map((event) => {
@@ -328,6 +374,10 @@ export function getCsvRows(events: BabyEvent[]) {
       ISO时间: event.timestamp,
       日期: format(timestamp, 'yyyy-MM-dd'),
       时间: format(timestamp, 'HH:mm:ss'),
+      体重kg:
+        event.type === 'weight' && isValidWeightKg(event.weightKg)
+          ? formatWeightKg(event.weightKg)
+          : '',
     }
   })
 }

@@ -10,15 +10,47 @@ create table if not exists public.baby_events (
       'feed_start',
       'feed_end',
       'poop',
-      'pee'
+      'pee',
+      'weight'
     )
   ),
+  weight_kg numeric,
   timestamp timestamptz not null,
   created_at timestamptz not null,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
   unique (user_id, client_id)
 );
+
+alter table public.baby_events
+  add column if not exists weight_kg numeric;
+
+alter table public.baby_events
+  drop constraint if exists baby_events_type_check;
+
+alter table public.baby_events
+  add constraint baby_events_type_check check (
+    type in (
+      'sleep_start',
+      'sleep_end',
+      'feed',
+      'feed_start',
+      'feed_end',
+      'poop',
+      'pee',
+      'weight'
+    )
+  );
+
+alter table public.baby_events
+  drop constraint if exists baby_events_weight_type_check;
+
+alter table public.baby_events
+  add constraint baby_events_weight_type_check check (
+    (type = 'weight' and weight_kg is not null and weight_kg > 0)
+    or
+    (type <> 'weight' and weight_kg is null)
+  );
 
 create index if not exists baby_events_user_updated_at_idx
   on public.baby_events (user_id, updated_at);

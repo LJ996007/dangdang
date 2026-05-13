@@ -6,6 +6,7 @@ export type BabyEventType =
   | 'feed_end'
   | 'poop'
   | 'pee'
+  | 'weight'
 
 export type SyncStatus = 'synced' | 'pending' | 'error'
 
@@ -14,6 +15,7 @@ export interface BabyEvent {
   clientId: string
   remoteId?: string | null
   type: BabyEventType
+  weightKg?: number | null
   timestamp: string
   createdAt: string
   updatedAt: string

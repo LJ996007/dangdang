@@ -15,6 +15,7 @@ interface RemoteBabyEvent {
   user_id: string
   client_id: string
   type: BabyEventType
+  weight_kg: number | null
   timestamp: string
   created_at: string
   updated_at: string
@@ -49,6 +50,7 @@ function toRemoteEvent(
     user_id: userId,
     client_id: event.clientId,
     type: event.type,
+    weight_kg: event.type === 'weight' ? event.weightKg ?? null : null,
     timestamp: event.timestamp,
     created_at: event.createdAt,
     updated_at: syncedAt,
@@ -193,6 +195,7 @@ function fromRemoteEvent(event: RemoteBabyEvent): BabyEvent {
     clientId: event.client_id,
     remoteId: event.id,
     type: event.type,
+    weightKg: event.weight_kg,
     timestamp: event.timestamp,
     createdAt: event.created_at,
     updatedAt: event.updated_at,
@@ -235,7 +238,7 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
   const pullQuery = supabase
     .from('baby_events')
     .select(
-      'id, user_id, client_id, type, timestamp, created_at, updated_at, deleted_at',
+      'id, user_id, client_id, type, weight_kg, timestamp, created_at, updated_at, deleted_at',
     )
     .order('updated_at', { ascending: true })
 

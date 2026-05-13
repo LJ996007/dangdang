@@ -1,6 +1,21 @@
 import Dexie, { type Table } from 'dexie'
 import type { BabyEvent, BabyEventType } from './types'
 
+function normalizeWeightKg(value: unknown) {
+  const numberValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value)
+        : Number.NaN
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return null
+  }
+
+  return Math.round(numberValue * 100) / 100
+}
+
 class DangdangDb extends Dexie {
   events!: Table<BabyEvent, number>
 
@@ -36,6 +51,20 @@ class DangdangDb extends Dexie {
             event.syncStatus = event.syncStatus || 'pending'
           }),
       )
+    this.version(3)
+      .stores({
+        events:
+          '++id,clientId,remoteId,timestamp,type,createdAt,updatedAt,deletedAt,syncStatus',
+      })
+      .upgrade((transaction) =>
+        transaction
+          .table<BabyEvent, number>('events')
+          .toCollection()
+          .modify((event) => {
+            event.weightKg =
+              event.type === 'weight' ? normalizeWeightKg(event.weightKg) : null
+          }),
+      )
   }
 }
 
@@ -68,6 +97,8 @@ const normalizeEvent = (
     clientId: event.clientId || createClientId(),
     remoteId: event.remoteId ?? null,
     type: event.type,
+    weightKg:
+      event.type === 'weight' ? normalizeWeightKg(event.weightKg) : null,
     timestamp: new Date(event.timestamp).toISOString(),
     createdAt,
     updatedAt: options.forcePending ? now : updatedAt,
@@ -80,6 +111,25 @@ export async function addEvent(type: BabyEventType, at = new Date()) {
   const now = new Date().toISOString()
   const event = normalizeEvent({
     type,
+    timestamp: at.toISOString(),
+    createdAt: now,
+    updatedAt: now,
+    syncStatus: 'pending',
+  })
+  const id = await db.events.add(event)
+  return { ...event, id }
+}
+
+export async function addWeightEvent(weightKg: number, at = new Date()) {
+  const normalizedWeightKg = normalizeWeightKg(weightKg)
+  if (normalizedWeightKg == null) {
+    throw new Error('invalid weight')
+  }
+
+  const now = new Date().toISOString()
+  const event = normalizeEvent({
+    type: 'weight',
+    weightKg: normalizedWeightKg,
     timestamp: at.toISOString(),
     createdAt: now,
     updatedAt: now,
@@ -131,6 +181,28 @@ export async function updateEventTimestamp(id: number, timestamp: Date) {
     updatedAt,
     syncStatus: 'pending',
   })
+}
+
+export async function updateEventDetails(
+  id: number,
+  updates: { timestamp: Date; weightKg?: number },
+) {
+  const updatedAt = new Date().toISOString()
+  const nextUpdates: Partial<BabyEvent> = {
+    timestamp: updates.timestamp.toISOString(),
+    updatedAt,
+    syncStatus: 'pending',
+  }
+
+  if (updates.weightKg != null) {
+    const normalizedWeightKg = normalizeWeightKg(updates.weightKg)
+    if (normalizedWeightKg == null) {
+      throw new Error('invalid weight')
+    }
+    nextUpdates.weightKg = normalizedWeightKg
+  }
+
+  await db.events.update(id, nextUpdates)
 }
 
 export async function clearEvents() {
