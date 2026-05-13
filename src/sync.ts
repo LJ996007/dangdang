@@ -40,14 +40,18 @@ function setLastSyncAt(value: string) {
   window.localStorage.setItem(lastSyncKey, value)
 }
 
-function toRemoteEvent(event: BabyEvent, userId: string): RemoteWritePayload {
+function toRemoteEvent(
+  event: BabyEvent,
+  userId: string,
+  syncedAt: string,
+): RemoteWritePayload {
   return {
     user_id: userId,
     client_id: event.clientId,
     type: event.type,
     timestamp: event.timestamp,
     created_at: event.createdAt,
-    updated_at: event.updatedAt,
+    updated_at: syncedAt,
     deleted_at: event.deletedAt ?? null,
   }
 }
@@ -127,7 +131,7 @@ async function pushRemoteEvent(
   event: BabyEvent,
   userId: string,
 ) {
-  const payload = toRemoteEvent(event, userId)
+  const payload = toRemoteEvent(event, userId, new Date().toISOString())
 
   if (event.remoteId) {
     const updatedEvent = await updateRemoteEvent(client, event.remoteId, payload)
@@ -214,17 +218,12 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
     }
   }
 
-  const previousSyncAt = getLastSyncAt()
-  let pullQuery = supabase
+  const pullQuery = supabase
     .from('baby_events')
     .select(
       'id, user_id, client_id, type, timestamp, created_at, updated_at, deleted_at',
     )
     .order('updated_at', { ascending: true })
-
-  if (previousSyncAt) {
-    pullQuery = pullQuery.gte('updated_at', previousSyncAt)
-  }
 
   const { data: remoteEvents, error: pullError } =
     await pullQuery.returns<RemoteBabyEvent[]>()
