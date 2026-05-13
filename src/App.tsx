@@ -695,9 +695,10 @@ function App() {
         if (!silent) {
           setNotice('已同步到云端')
         }
-      } catch {
+      } catch (error) {
         await refreshEvents()
-        setSyncMessage('同步失败，稍后会自动重试')
+        const message = error instanceof Error ? error.message : '未知错误'
+        setSyncMessage(`同步失败：${message}`)
         if (!silent) {
           setNotice('同步失败，记录已保存在本机')
         }

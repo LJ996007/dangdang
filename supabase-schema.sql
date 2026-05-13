@@ -23,6 +23,19 @@ create table if not exists public.baby_events (
 create index if not exists baby_events_user_updated_at_idx
   on public.baby_events (user_id, updated_at);
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.baby_events'::regclass
+      and conname = 'baby_events_user_id_client_id_key'
+  ) then
+    alter table public.baby_events
+      add constraint baby_events_user_id_client_id_key unique (user_id, client_id);
+  end if;
+end $$;
+
 alter table public.baby_events enable row level security;
 
 drop policy if exists "Users can view own baby events"
