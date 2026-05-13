@@ -7,11 +7,18 @@ export type BabyEventType =
   | 'poop'
   | 'pee'
 
+export type SyncStatus = 'synced' | 'pending' | 'error'
+
 export interface BabyEvent {
   id?: number
+  clientId: string
+  remoteId?: string | null
   type: BabyEventType
   timestamp: string
   createdAt: string
+  updatedAt: string
+  deletedAt?: string | null
+  syncStatus: SyncStatus
 }
 
 export interface ImportPayload {

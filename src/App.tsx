@@ -1,8 +1,18 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import { format } from 'date-fns'
 import {
   BarChart3,
   CalendarDays,
+  Cloud,
+  CloudOff,
   Clock3,
   Database,
   Download,
@@ -10,17 +20,23 @@ import {
   FileSpreadsheet,
   Home,
   List,
+  Lock,
+  LogOut,
+  Mail,
   Milk,
   Moon,
   Pencil,
+  RefreshCw,
   ShieldCheck,
   Sunrise,
   Toilet,
   Trash2,
   Upload,
+  WifiOff,
   Droplets,
   type LucideIcon,
 } from 'lucide-react'
+import type { Session } from '@supabase/supabase-js'
 import {
   Bar,
   BarChart,
@@ -53,9 +69,12 @@ import {
   clearEvents,
   deleteEvent,
   getEvents,
+  getPendingEventCount,
   replaceEvents,
   updateEventTimestamp,
 } from './db'
+import { isSupabaseConfigured, supabase } from './supabase'
+import { getLastSyncAt, syncEvents } from './sync'
 import type { BabyEvent, BabyEventType, ImportPayload } from './types'
 
 type TabId = 'record' | 'analysis' | 'data'
@@ -330,7 +349,7 @@ function RecentEvents({
               <span>{format(timestamp, 'MM月dd日 HH:mm')}</span>
             </div>
             {event.id != null && (
-              <div className="event-row-actions">
+              <div className="event-actions">
                 <button
                   className="edit-event-button"
                   type="button"
@@ -445,6 +464,164 @@ function EditTimeModal({
   )
 }
 
+function formatSyncTime(value: string | null) {
+  if (!value) {
+    return '尚未同步'
+  }
+
+  return format(new Date(value), 'MM月dd日 HH:mm')
+}
+
+function AuthScreen({
+  mode,
+  email,
+  password,
+  message,
+  isBusy,
+  onEmailChange,
+  onPasswordChange,
+  onModeChange,
+  onSubmit,
+}: {
+  mode: 'signin' | 'signup'
+  email: string
+  password: string
+  message: string
+  isBusy: boolean
+  onEmailChange: (value: string) => void
+  onPasswordChange: (value: string) => void
+  onModeChange: (mode: 'signin' | 'signup') => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  const isSignup = mode === 'signup'
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="brand auth-brand">
+          <img src="/icon-192.png" alt="" />
+          <div>
+            <h1>当当日记</h1>
+            <p>登录后在不同设备间同步记录</p>
+          </div>
+        </div>
+
+        <form className="auth-form" onSubmit={onSubmit}>
+          <label>
+            <span>
+              <Mail aria-hidden="true" size={16} />
+              邮箱
+            </span>
+            <input
+              autoComplete="email"
+              inputMode="email"
+              required
+              type="email"
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>
+              <Lock aria-hidden="true" size={16} />
+              密码
+            </span>
+            <input
+              autoComplete={isSignup ? 'new-password' : 'current-password'}
+              minLength={6}
+              required
+              type="password"
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+            />
+          </label>
+          <button disabled={isBusy} type="submit">
+            {isBusy ? '处理中...' : isSignup ? '注册并登录' : '登录'}
+          </button>
+        </form>
+
+        {message && <p className="auth-message">{message}</p>}
+
+        <button
+          className="link-button"
+          type="button"
+          onClick={() => onModeChange(isSignup ? 'signin' : 'signup')}
+        >
+          {isSignup ? '已有账号，去登录' : '没有账号，注册一个家庭账号'}
+        </button>
+      </section>
+    </main>
+  )
+}
+
+function SyncPanel({
+  session,
+  pendingCount,
+  lastSyncAt,
+  syncMessage,
+  isSyncing,
+  onSync,
+  onSignOut,
+}: {
+  session: Session | null
+  pendingCount: number
+  lastSyncAt: string | null
+  syncMessage: string
+  isSyncing: boolean
+  onSync: () => void
+  onSignOut: () => void
+}) {
+  if (!isSupabaseConfigured) {
+    return (
+      <section className="backup-panel sync-panel">
+        <div className="section-title">
+          <CloudOff aria-hidden="true" size={18} />
+          <h2>云同步未配置</h2>
+        </div>
+        <p>
+          添加 Supabase 环境变量后，登录界面和多设备同步会自动启用。当前仍可本机离线记录。
+        </p>
+        <code>VITE_SUPABASE_URL</code>
+        <code>VITE_SUPABASE_PUBLISHABLE_KEY</code>
+      </section>
+    )
+  }
+
+  return (
+    <section className="backup-panel sync-panel">
+      <div className="section-title">
+        <Cloud aria-hidden="true" size={18} />
+        <h2>云同步</h2>
+      </div>
+      <div className="sync-grid">
+        <article>
+          <span>当前账号</span>
+          <strong>{session?.user.email ?? '--'}</strong>
+        </article>
+        <article>
+          <span>最后同步</span>
+          <strong>{formatSyncTime(lastSyncAt)}</strong>
+        </article>
+        <article>
+          <span>待同步</span>
+          <strong>{pendingCount}</strong>
+        </article>
+      </div>
+      <p>{syncMessage}</p>
+      <div className="backup-actions">
+        <button disabled={isSyncing || !session} type="button" onClick={onSync}>
+          <RefreshCw aria-hidden="true" size={18} />
+          {isSyncing ? '同步中' : '手动同步'}
+        </button>
+        <button type="button" onClick={onSignOut}>
+          <LogOut aria-hidden="true" size={18} />
+          退出登录
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function App() {
   const [events, setEvents] = useState<BabyEvent[]>([])
   const [activeTab, setActiveTab] = useState<TabId>('record')
@@ -452,27 +629,155 @@ function App() {
     format(new Date(), 'yyyy-MM-dd'),
   )
   const [now, setNow] = useState(() => new Date())
-  const [notice, setNotice] = useState('数据只保存在这台手机的浏览器里')
+  const [notice, setNotice] = useState(
+    isSupabaseConfigured
+      ? '登录后可在不同设备间同步'
+      : '未配置云同步，当前只保存在本机',
+  )
   const [editingEvent, setEditingEvent] = useState<BabyEvent | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured)
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : getLastSyncAt(),
+  )
+  const [syncMessage, setSyncMessage] = useState(
+    isSupabaseConfigured
+      ? '登录后会自动同步'
+      : '缺少 Supabase 环境变量',
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const refreshEvents = useCallback(async () => {
-    setEvents(await getEvents())
+    const [loadedEvents, loadedPendingCount] = await Promise.all([
+      getEvents(),
+      getPendingEventCount(),
+    ])
+    setEvents(loadedEvents)
+    setPendingCount(loadedPendingCount)
   }, [])
+
+  const performSync = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!isSupabaseConfigured || !supabase) {
+        return
+      }
+
+      if (!session) {
+        setSyncMessage('请先登录后再同步')
+        return
+      }
+
+      if (!navigator.onLine) {
+        setSyncMessage('当前离线，记录会先保存在本机')
+        await refreshEvents()
+        return
+      }
+
+      setIsSyncing(true)
+      if (!silent) {
+        setSyncMessage('正在同步...')
+      }
+
+      try {
+        const result = await syncEvents(session.user.id)
+        await refreshEvents()
+        setLastSyncAt(result.syncedAt)
+        setSyncMessage(
+          `同步完成：上传 ${result.pushed} 条，拉取 ${result.pulled} 条，待同步 ${result.pending} 条`,
+        )
+        if (!silent) {
+          setNotice('已同步到云端')
+        }
+      } catch {
+        await refreshEvents()
+        setSyncMessage('同步失败，稍后会自动重试')
+        if (!silent) {
+          setNotice('同步失败，记录已保存在本机')
+        }
+      } finally {
+        setIsSyncing(false)
+      }
+    },
+    [refreshEvents, session],
+  )
 
   useEffect(() => {
     let cancelled = false
 
-    void getEvents().then((loadedEvents) => {
+    void Promise.all([getEvents(), getPendingEventCount()]).then(
+      ([loadedEvents, loadedPendingCount]) => {
       if (!cancelled) {
         setEvents(loadedEvents)
+          setPendingCount(loadedPendingCount)
       }
-    })
+      },
+    )
 
     return () => {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      return
+    }
+
+    let cancelled = false
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) {
+        setSession(data.session)
+        setAuthReady(true)
+      }
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthReady(true)
+    })
+
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+
+    const syncTimer = window.setTimeout(() => {
+      void performSync({ silent: true })
+    }, 0)
+
+    const handleOnline = () => {
+      void performSync({ silent: true })
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void performSync({ silent: true })
+      }
+    }
+
+    window.addEventListener('online', handleOnline)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      window.clearTimeout(syncTimer)
+      window.removeEventListener('online', handleOnline)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [performSync, session])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000)
@@ -517,40 +822,102 @@ function App() {
     [events, now],
   )
 
+  const finishLocalChange = useCallback(async () => {
+    await refreshEvents()
+
+    if (session && isSupabaseConfigured) {
+      void performSync({ silent: true })
+      return
+    }
+
+    setSyncMessage(
+      isSupabaseConfigured
+        ? '已保存在本机，登录后会同步'
+        : '当前为本机离线记录',
+    )
+  }, [performSync, refreshEvents, session])
+
+  const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!supabase) {
+      setAuthMessage('Supabase 尚未配置')
+      return
+    }
+
+    setAuthBusy(true)
+    setAuthMessage('')
+
+    const credentials = {
+      email: authEmail.trim(),
+      password: authPassword,
+    }
+    const { data, error } =
+      authMode === 'signin'
+        ? await supabase.auth.signInWithPassword(credentials)
+        : await supabase.auth.signUp(credentials)
+
+    setAuthBusy(false)
+
+    if (error) {
+      setAuthMessage(error.message)
+      return
+    }
+
+    if (data.session) {
+      setSession(data.session)
+      setNotice('已登录，正在同步云端数据')
+      return
+    }
+
+    setAuthMessage('注册成功，请按邮件提示确认后再登录')
+  }
+
+  const handleSignOut = async () => {
+    if (!supabase) {
+      return
+    }
+
+    await supabase.auth.signOut()
+    setSession(null)
+    setNotice('已退出登录，本机记录仍保留')
+    setSyncMessage('登录后会自动同步')
+  }
+
   const handleSleepStart = async () => {
     await addEvent('sleep_start')
     setNotice('已记录睡觉开始时间')
-    await refreshEvents()
+    await finishLocalChange()
   }
 
   const handleSleepEnd = async () => {
     await addEvent('sleep_end')
     setNotice('已记录睡觉结束时间')
-    await refreshEvents()
+    await finishLocalChange()
   }
 
   const handleFeedStart = async () => {
     await addEvent('feed_start')
     setNotice('已记录吃奶开始时间')
-    await refreshEvents()
+    await finishLocalChange()
   }
 
   const handleFeedEnd = async () => {
     await addEvent('feed_end')
     setNotice('已记录吃奶结束时间')
-    await refreshEvents()
+    await finishLocalChange()
   }
 
   const handlePoop = async () => {
     await addEvent('poop')
     setNotice('已记录便便时间')
-    await refreshEvents()
+    await finishLocalChange()
   }
 
   const handlePee = async () => {
     await addEvent('pee')
     setNotice('已记录尿泡时间')
-    await refreshEvents()
+    await finishLocalChange()
   }
 
   const handleExportJson = () => {
@@ -587,13 +954,13 @@ function App() {
         throw new Error('invalid payload')
       }
 
-      if (!window.confirm('导入会覆盖当前本机数据，继续吗？')) {
+      if (!window.confirm('导入会替换当前本机缓存，并在登录后同步到云端，继续吗？')) {
         return
       }
 
       await replaceEvents(parsed.events)
-      await refreshEvents()
       setNotice(`已导入 ${parsed.events.length} 条记录`)
+      await finishLocalChange()
     } catch {
       setNotice('导入失败，请选择本应用导出的JSON备份')
     } finally {
@@ -604,13 +971,13 @@ function App() {
   }
 
   const handleClear = async () => {
-    if (!window.confirm('确定清空所有本机记录吗？此操作不能撤销。')) {
+    if (!window.confirm('确定清空全部记录吗？登录后会同步删除到云端。')) {
       return
     }
 
     await clearEvents()
-    await refreshEvents()
-    setNotice('已清空本机记录')
+    setNotice('已清空全部记录')
+    await finishLocalChange()
   }
 
   const handleDeleteEvent = async (event: BabyEvent) => {
@@ -624,8 +991,8 @@ function App() {
     }
 
     await deleteEvent(event.id)
-    await refreshEvents()
     setNotice('已删除单条记录')
+    await finishLocalChange()
   }
 
   const handleEditEvent = (event: BabyEvent) => {
@@ -642,8 +1009,8 @@ function App() {
 
     await updateEventTimestamp(editingEvent.id, newTimestamp)
     setEditingEvent(null)
-    await refreshEvents()
     setNotice(`已将时间修改为 ${format(newTimestamp, 'HH:mm')}`)
+    await finishLocalChange()
   }
 
   const lastFeedTime = lastFeed ? new Date(lastFeed.timestamp) : null
@@ -653,6 +1020,51 @@ function App() {
   const currentFeedDuration = currentFeedStart
     ? formatDuration(Math.max(0, Math.round((now.getTime() - currentFeedStart.getTime()) / 60000)))
     : null
+  const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine
+  const SyncBadgeIcon = !isSupabaseConfigured
+    ? CloudOff
+    : !isOnline
+      ? WifiOff
+      : Cloud
+  const syncBadgeText = !isSupabaseConfigured
+    ? '本机'
+    : !isOnline
+      ? '离线'
+      : pendingCount > 0
+        ? `${pendingCount} 待同步`
+        : '已同步'
+
+  if (isSupabaseConfigured && !authReady) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <div className="brand auth-brand">
+            <img src="/icon-192.png" alt="" />
+            <div>
+              <h1>当当日记</h1>
+              <p>正在检查登录状态...</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (isSupabaseConfigured && authReady && !session) {
+    return (
+      <AuthScreen
+        email={authEmail}
+        isBusy={authBusy}
+        message={authMessage}
+        mode={authMode}
+        password={authPassword}
+        onEmailChange={setAuthEmail}
+        onModeChange={setAuthMode}
+        onPasswordChange={setAuthPassword}
+        onSubmit={handleAuthSubmit}
+      />
+    )
+  }
 
   return (
     <main className="app-shell">
@@ -664,7 +1076,13 @@ function App() {
             <p>{notice}</p>
           </div>
         </div>
-        <time dateTime={now.toISOString()}>{format(now, 'HH:mm')}</time>
+        <div className="header-meta">
+          <span className="sync-pill">
+            <SyncBadgeIcon aria-hidden="true" size={15} />
+            {syncBadgeText}
+          </span>
+          <time dateTime={now.toISOString()}>{format(now, 'HH:mm')}</time>
+        </div>
       </header>
 
       <section className={`status-strip ${currentSleepStart ? 'sleeping' : ''}`}>
@@ -907,13 +1325,23 @@ function App() {
 
       {activeTab === 'data' && (
         <section className="screen">
+          <SyncPanel
+            isSyncing={isSyncing}
+            lastSyncAt={lastSyncAt}
+            pendingCount={pendingCount}
+            session={session}
+            syncMessage={syncMessage}
+            onSignOut={() => void handleSignOut()}
+            onSync={() => void performSync({ silent: false })}
+          />
+
           <section className="backup-panel">
             <div className="section-title">
               <ShieldCheck aria-hidden="true" size={18} />
               <h2>备份与迁移</h2>
             </div>
             <p>
-              记录保存在本机 IndexedDB。建议隔几天导出一次 JSON 备份，换手机时可以导入恢复。
+              记录会先保存在本机 IndexedDB；登录后自动同步到云端。JSON 备份仍可用于手动迁移或留档。
             </p>
             <div className="backup-actions">
               <button type="button" onClick={handleExportJson}>
@@ -981,7 +1409,7 @@ function App() {
             </div>
             <button className="danger-button" type="button" onClick={handleClear}>
               <Trash2 aria-hidden="true" size={18} />
-              清空本机记录
+              清空全部记录
             </button>
           </section>
 
