@@ -6,7 +6,8 @@ import {
   startOfDay,
   subDays,
 } from 'date-fns'
-import type { BabyEvent } from './types'
+import type { BabyEvent, WeightOwner } from './types'
+import { weightOwnerLabels } from './weights'
 
 export interface SleepSession {
   start: Date
@@ -65,6 +66,7 @@ export interface IntervalPoint {
 export interface WeightPoint {
   label: string
   weightKg: number
+  owner: WeightOwner
 }
 
 export interface DayStats {
@@ -73,6 +75,8 @@ export interface DayStats {
   poopEvents: BabyEvent[]
   peeEvents: BabyEvent[]
   weightEvents: BabyEvent[]
+  babyWeightEvents: BabyEvent[]
+  motherWeightEvents: BabyEvent[]
   feedMarkers: FeedMarker[]
   poopMarkers: FeedMarker[]
   peeMarkers: FeedMarker[]
@@ -111,22 +115,29 @@ export function formatWeightKg(value: number | null | undefined) {
   })
 }
 
-export function getWeightEvents(events: BabyEvent[]) {
+export function getWeightEvents(events: BabyEvent[], owner?: WeightOwner) {
   return sortEvents(events).filter(
-    (event) => event.type === 'weight' && isValidWeightKg(event.weightKg),
+    (event) =>
+      event.type === 'weight' &&
+      isValidWeightKg(event.weightKg) &&
+      (owner == null || event.weightOwner === owner),
   )
 }
 
-export function getLatestWeight(events: BabyEvent[]) {
-  return getWeightEvents(events).at(-1)
+export function getLatestWeight(events: BabyEvent[], owner?: WeightOwner) {
+  return getWeightEvents(events, owner).at(-1)
 }
 
-export function getWeightTrend(events: BabyEvent[]): WeightPoint[] {
-  return getWeightEvents(events).map((event) => {
+export function getWeightTrend(
+  events: BabyEvent[],
+  owner?: WeightOwner,
+): WeightPoint[] {
+  return getWeightEvents(events, owner).map((event) => {
     const timestamp = new Date(event.timestamp)
     return {
       label: format(timestamp, 'MM/dd HH:mm'),
       weightKg: event.weightKg!,
+      owner: event.weightOwner!,
     }
   })
 }
@@ -226,6 +237,12 @@ export function getDayStats(
   const weightEvents = dayEvents.filter(
     (event) => event.type === 'weight' && isValidWeightKg(event.weightKg),
   )
+  const babyWeightEvents = weightEvents.filter(
+    (event) => event.weightOwner === 'baby',
+  )
+  const motherWeightEvents = weightEvents.filter(
+    (event) => event.weightOwner === 'mother',
+  )
 
   const feedMarkers = legacyFeedEvents.map(toMarker)
   const poopMarkers = poopEvents.map(toMarker)
@@ -300,6 +317,8 @@ export function getDayStats(
     poopEvents,
     peeEvents,
     weightEvents,
+    babyWeightEvents,
+    motherWeightEvents,
     feedMarkers,
     poopMarkers,
     peeMarkers,
@@ -497,8 +516,20 @@ export function getCsvRows(events: BabyEvent[]) {
       ISO时间: event.timestamp,
       日期: format(timestamp, 'yyyy-MM-dd'),
       时间: format(timestamp, 'HH:mm:ss'),
-      体重kg:
-        event.type === 'weight' && isValidWeightKg(event.weightKg)
+      体重对象:
+        event.type === 'weight' && event.weightOwner
+          ? weightOwnerLabels[event.weightOwner]
+          : '',
+      宝宝体重kg:
+        event.type === 'weight' &&
+        event.weightOwner === 'baby' &&
+        isValidWeightKg(event.weightKg)
+          ? formatWeightKg(event.weightKg)
+          : '',
+      妈妈体重kg:
+        event.type === 'weight' &&
+        event.weightOwner === 'mother' &&
+        isValidWeightKg(event.weightKg)
           ? formatWeightKg(event.weightKg)
           : '',
     }

@@ -15,6 +15,7 @@ create table if not exists public.baby_events (
     )
   ),
   weight_kg numeric,
+  weight_owner text,
   timestamp timestamptz not null,
   created_at timestamptz not null,
   updated_at timestamptz not null default now(),
@@ -24,6 +25,23 @@ create table if not exists public.baby_events (
 
 alter table public.baby_events
   add column if not exists weight_kg numeric;
+
+alter table public.baby_events
+  add column if not exists weight_owner text;
+
+update public.baby_events
+set weight_owner = case
+  when weight_kg < 10 then 'baby'
+  else 'mother'
+end
+where type = 'weight'
+  and weight_kg is not null
+  and weight_owner is null;
+
+update public.baby_events
+set weight_owner = null
+where type <> 'weight'
+  and weight_owner is not null;
 
 alter table public.baby_events
   drop constraint if exists baby_events_type_check;
@@ -47,9 +65,14 @@ alter table public.baby_events
 
 alter table public.baby_events
   add constraint baby_events_weight_type_check check (
-    (type = 'weight' and weight_kg is not null and weight_kg > 0)
+    (
+      type = 'weight'
+      and weight_kg is not null
+      and weight_kg > 0
+      and weight_owner in ('baby', 'mother')
+    )
     or
-    (type <> 'weight' and weight_kg is null)
+    (type <> 'weight' and weight_kg is null and weight_owner is null)
   );
 
 create index if not exists baby_events_user_updated_at_idx

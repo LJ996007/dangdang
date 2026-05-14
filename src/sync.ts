@@ -6,7 +6,7 @@ import {
   upsertRemoteEvents,
 } from './db'
 import { isSupabaseConfigured, supabase } from './supabase'
-import type { BabyEvent, BabyEventType } from './types'
+import type { BabyEvent, BabyEventType, WeightOwner } from './types'
 
 const lastSyncKey = 'dangdang-last-sync-at'
 
@@ -16,14 +16,19 @@ interface RemoteBabyEvent {
   client_id: string
   type: BabyEventType
   weight_kg?: number | string | null
+  weight_owner?: WeightOwner | null
   timestamp: string
   created_at: string
   updated_at: string
   deleted_at: string | null
 }
 
-type RemoteWritePayload = Omit<RemoteBabyEvent, 'id' | 'weight_kg'> & {
+type RemoteWritePayload = Omit<
+  RemoteBabyEvent,
+  'id' | 'weight_kg' | 'weight_owner'
+> & {
   weight_kg?: number | null
+  weight_owner?: WeightOwner | null
 }
 type RemoteWriteResult = Pick<RemoteBabyEvent, 'id' | 'client_id' | 'updated_at'>
 type SupabaseClient = NonNullable<typeof supabase>
@@ -61,6 +66,7 @@ function toRemoteEvent(
 
   if (event.type === 'weight') {
     payload.weight_kg = event.weightKg ?? null
+    payload.weight_owner = event.weightOwner ?? null
   }
 
   return payload
@@ -98,6 +104,7 @@ function isMissingWeightColumnError(error: unknown) {
   return (
     record.code === 'PGRST204' ||
     hasErrorText(error, /weight_kg/i) ||
+    hasErrorText(error, /weight_owner/i) ||
     hasErrorText(error, /schema cache/i)
   )
 }
@@ -127,7 +134,7 @@ function getEventSyncErrorMessage(event: BabyEvent, error: unknown) {
 async function checkRemoteWeightColumnSupport(client: SupabaseClient) {
   const { error } = await client
     .from('baby_events')
-    .select('weight_kg')
+    .select('weight_kg, weight_owner')
     .limit(1)
 
   if (!error) {
@@ -263,6 +270,7 @@ function fromRemoteEvent(event: RemoteBabyEvent): BabyEvent {
     remoteId: event.id,
     type: event.type,
     weightKg: event.weight_kg == null ? null : Number(event.weight_kg),
+    weightOwner: event.weight_owner ?? null,
     timestamp: event.timestamp,
     createdAt: event.created_at,
     updatedAt: event.updated_at,
@@ -276,13 +284,19 @@ async function pullRemoteEvents(
   hasWeightColumn: boolean,
 ) {
   const columns = hasWeightColumn
-    ? 'id, user_id, client_id, type, weight_kg, timestamp, created_at, updated_at, deleted_at'
+    ? 'id, user_id, client_id, type, weight_kg, weight_owner, timestamp, created_at, updated_at, deleted_at'
     : 'id, user_id, client_id, type, timestamp, created_at, updated_at, deleted_at'
 
-  const { data, error } = await client
+  let query = client
     .from('baby_events')
     .select(columns)
     .order('updated_at', { ascending: true })
+
+  if (!hasWeightColumn) {
+    query = query.neq('type', 'weight')
+  }
+
+  const { data, error } = await query
     .returns<RemoteBabyEvent[]>()
 
   if (error) {

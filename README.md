@@ -1,6 +1,6 @@
 # 当当日记
 
-新生儿睡眠、吃奶、便便、尿泡和体重记录 PWA。睡觉和吃奶支持开始/结束记录并计算持续时间，便便和尿泡一键记录当前时间，体重以千克记录并自动纳入当前日期。数据会先保存在本机 IndexedDB；配置 Supabase 后可登录并在不同设备间同步，同时保留每日时间轴、喂奶间隔曲线、近 7 天睡眠统计、体重趋势，以及 JSON/CSV 导出。
+新生儿睡眠、吃奶、便便、尿泡和体重记录 PWA。睡觉和吃奶支持开始/结束记录并计算持续时间，便便和尿泡一键记录当前时间，宝宝体重和妈妈体重以千克记录并自动纳入当前日期。数据会先保存在本机 IndexedDB；配置 Supabase 后可登录并在不同设备间同步，同时保留每日时间轴、喂奶间隔曲线、近 7 天睡眠统计、宝宝/妈妈体重趋势，以及 JSON/CSV 导出。
 
 ## 技术栈
 
@@ -13,7 +13,7 @@
 ## Supabase 云同步
 
 1. 在 Supabase 项目 SQL Editor 执行 `supabase-schema.sql`。
-   已有项目升级到体重记录版本时，也需要重新执行一次该 SQL，以增加 `weight_kg` 字段并刷新 Supabase REST schema cache。
+   已有项目升级到宝宝/妈妈体重版本时，也需要重新执行一次该 SQL，以增加 `weight_owner` 字段并刷新 Supabase REST schema cache。
 2. 复制 `.env.example` 为 `.env.local`，填入项目的 URL 和 publishable/anon key：
 
 ```env

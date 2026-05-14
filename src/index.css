@@ -456,9 +456,20 @@ p {
 
 .weight-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.weight-card {
+  display: grid;
+  min-width: 0;
   gap: 10px;
-  align-items: end;
+}
+
+.weight-card + .weight-card {
+  padding-left: 14px;
+  box-shadow: inset 1px 0 0 var(--line);
 }
 
 .weight-form label {
@@ -502,17 +513,23 @@ p {
 
 .weight-form button {
   display: inline-flex;
-  min-height: 46px;
+  width: min(112px, 100%);
+  min-height: 34px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 0 14px;
+  gap: 4px;
+  padding: 0 9px;
   border-radius: 8px;
   background: var(--weight-dark);
   color: #fff;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 760;
   white-space: nowrap;
+}
+
+.weight-form button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .weight-form button:disabled {
@@ -521,8 +538,10 @@ p {
 }
 
 .weight-recorder p {
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.35;
 }
 
 .section-title {
@@ -905,6 +924,28 @@ p {
   font-weight: 620;
 }
 
+.owner-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.owner-toggle button {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.owner-toggle button.active {
+  border-color: rgba(77, 65, 154, 0.22);
+  background: rgba(111, 99, 197, 0.1);
+  color: var(--weight-dark);
+}
+
 .time-preview {
   display: flex;
   flex-direction: column;
@@ -1269,7 +1310,11 @@ p {
   }
 
   .weight-form {
-    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .weight-card + .weight-card {
+    padding-left: 10px;
   }
 
   .sync-grid {
@@ -1288,6 +1333,16 @@ p {
 @media (max-width: 380px) {
   .brand h1 {
     font-size: 21px;
+  }
+
+  .weight-form {
+    grid-template-columns: 1fr;
+  }
+
+  .weight-card + .weight-card {
+    padding-left: 0;
+    padding-top: 12px;
+    box-shadow: inset 0 1px 0 var(--line);
   }
 
   .brand p {

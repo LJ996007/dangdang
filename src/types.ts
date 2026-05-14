@@ -10,12 +10,15 @@ export type BabyEventType =
 
 export type SyncStatus = 'synced' | 'pending' | 'error'
 
+export type WeightOwner = 'baby' | 'mother'
+
 export interface BabyEvent {
   id?: number
   clientId: string
   remoteId?: string | null
   type: BabyEventType
   weightKg?: number | null
+  weightOwner?: WeightOwner | null
   timestamp: string
   createdAt: string
   updatedAt: string
@@ -24,7 +27,7 @@ export interface BabyEvent {
 }
 
 export interface ImportPayload {
-  version: 1
+  version: 1 | 2
   exportedAt: string
   events: BabyEvent[]
 }
