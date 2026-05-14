@@ -765,20 +765,26 @@ p {
 }
 
 .event-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 50px;
 }
 
 .event-icon {
-  display: inline-flex;
+  display: flex;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   border-radius: 8px;
+}
+
+.event-icon svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .event-icon.sleep {
@@ -811,8 +817,8 @@ p {
   color: #9b6715;
 }
 
-.event-row strong,
-.event-row span {
+.event-row > div:not(.event-actions) strong,
+.event-row > div:not(.event-actions) span {
   display: block;
 }
 
@@ -822,15 +828,15 @@ p {
   line-height: 1.2;
 }
 
-.event-row > div {
+.event-row > div:not(.event-actions) {
   min-width: 0;
-  flex: 1 1 auto;
 }
 
 .event-row-actions,
 .event-actions {
   display: inline-flex;
-  flex: 0 0 auto;
+  justify-self: end;
+  align-self: center;
   align-items: center;
   gap: 6px;
 }
@@ -844,6 +850,12 @@ p {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
+}
+
+.edit-event-button svg,
+.delete-event-button svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .edit-event-button {
