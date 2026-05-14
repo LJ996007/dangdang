@@ -13,6 +13,7 @@
 ## Supabase 云同步
 
 1. 在 Supabase 项目 SQL Editor 执行 `supabase-schema.sql`。
+   已有项目升级到体重记录版本时，也需要重新执行一次该 SQL，以增加 `weight_kg` 字段并刷新 Supabase REST schema cache。
 2. 复制 `.env.example` 为 `.env.local`，填入项目的 URL 和 publishable/anon key：
 
 ```env

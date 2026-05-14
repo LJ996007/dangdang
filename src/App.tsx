@@ -818,10 +818,11 @@ function App() {
         await refreshEvents()
         setLastSyncAt(result.syncedAt)
         setSyncMessage(
-          `同步完成：上传 ${result.pushed} 条，拉取 ${result.pulled} 条，待同步 ${result.pending} 条`,
+          result.warning ??
+            `同步完成：上传 ${result.pushed} 条，拉取 ${result.pulled} 条，待同步 ${result.pending} 条`,
         )
         if (!silent) {
-          setNotice('已同步到云端')
+          setNotice(result.warning ? '部分记录尚未同步' : '已同步到云端')
         }
       } catch (error) {
         await refreshEvents()

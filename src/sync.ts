@@ -15,14 +15,16 @@ interface RemoteBabyEvent {
   user_id: string
   client_id: string
   type: BabyEventType
-  weight_kg: number | null
+  weight_kg?: number | string | null
   timestamp: string
   created_at: string
   updated_at: string
   deleted_at: string | null
 }
 
-type RemoteWritePayload = Omit<RemoteBabyEvent, 'id'>
+type RemoteWritePayload = Omit<RemoteBabyEvent, 'id' | 'weight_kg'> & {
+  weight_kg?: number | null
+}
 type RemoteWriteResult = Pick<RemoteBabyEvent, 'id' | 'client_id' | 'updated_at'>
 type SupabaseClient = NonNullable<typeof supabase>
 
@@ -31,6 +33,7 @@ export interface SyncResult {
   pulled: number
   pending: number
   syncedAt: string | null
+  warning?: string
 }
 
 export function getLastSyncAt() {
@@ -46,16 +49,21 @@ function toRemoteEvent(
   userId: string,
   syncedAt: string,
 ): RemoteWritePayload {
-  return {
+  const payload: RemoteWritePayload = {
     user_id: userId,
     client_id: event.clientId,
     type: event.type,
-    weight_kg: event.type === 'weight' ? event.weightKg ?? null : null,
     timestamp: event.timestamp,
     created_at: event.createdAt,
     updated_at: syncedAt,
     deleted_at: event.deletedAt ?? null,
   }
+
+  if (event.type === 'weight') {
+    payload.weight_kg = event.weightKg ?? null
+  }
+
+  return payload
 }
 
 function getErrorMessage(error: unknown) {
@@ -75,6 +83,62 @@ function getErrorMessage(error: unknown) {
   }
 
   return '未知错误'
+}
+
+function hasErrorText(error: unknown, pattern: RegExp) {
+  return pattern.test(getErrorMessage(error))
+}
+
+function isMissingWeightColumnError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const record = error as Record<string, unknown>
+  return (
+    record.code === 'PGRST204' ||
+    hasErrorText(error, /weight_kg/i) ||
+    hasErrorText(error, /schema cache/i)
+  )
+}
+
+function isMissingWeightTypeError(error: unknown) {
+  return (
+    hasErrorText(error, /baby_events_type_check/i) ||
+    hasErrorText(error, /check constraint/i)
+  )
+}
+
+function getEventSyncErrorMessage(event: BabyEvent, error: unknown) {
+  if (
+    event.type === 'weight' &&
+    (isMissingWeightColumnError(error) || isMissingWeightTypeError(error))
+  ) {
+    return [
+      '体重记录需要先升级 Supabase 表结构',
+      '请在 Supabase SQL Editor 重新执行 supabase-schema.sql',
+      getErrorMessage(error),
+    ].join(' / ')
+  }
+
+  return getErrorMessage(error)
+}
+
+async function checkRemoteWeightColumnSupport(client: SupabaseClient) {
+  const { error } = await client
+    .from('baby_events')
+    .select('weight_kg')
+    .limit(1)
+
+  if (!error) {
+    return true
+  }
+
+  if (isMissingWeightColumnError(error)) {
+    return false
+  }
+
+  throw error
 }
 
 async function updateRemoteEvent(
@@ -180,7 +244,10 @@ async function pushLocalEvents(
     } catch (error) {
       await markEventsSyncError([event.clientId])
       failedMessages.push(
-        `${event.type} ${event.timestamp}: ${getErrorMessage(error)}`,
+        `${event.type} ${event.timestamp}: ${getEventSyncErrorMessage(
+          event,
+          error,
+        )}`,
       )
     }
   }
@@ -195,13 +262,34 @@ function fromRemoteEvent(event: RemoteBabyEvent): BabyEvent {
     clientId: event.client_id,
     remoteId: event.id,
     type: event.type,
-    weightKg: event.weight_kg,
+    weightKg: event.weight_kg == null ? null : Number(event.weight_kg),
     timestamp: event.timestamp,
     createdAt: event.created_at,
     updatedAt: event.updated_at,
     deletedAt: event.deleted_at,
     syncStatus: 'synced',
   }
+}
+
+async function pullRemoteEvents(
+  client: SupabaseClient,
+  hasWeightColumn: boolean,
+) {
+  const columns = hasWeightColumn
+    ? 'id, user_id, client_id, type, weight_kg, timestamp, created_at, updated_at, deleted_at'
+    : 'id, user_id, client_id, type, timestamp, created_at, updated_at, deleted_at'
+
+  const { data, error } = await client
+    .from('baby_events')
+    .select(columns)
+    .order('updated_at', { ascending: true })
+    .returns<RemoteBabyEvent[]>()
+
+  if (error) {
+    throw error
+  }
+
+  return data ?? []
 }
 
 export async function syncEvents(userId: string): Promise<SyncResult> {
@@ -219,11 +307,24 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
     (event) => event.syncStatus === 'pending' || event.syncStatus === 'error',
   )
   let pushed = 0
+  const hasWeightColumn = await checkRemoteWeightColumnSupport(supabase)
+  const weightEventsWaitingForMigration = hasWeightColumn
+    ? []
+    : pendingEvents.filter((event) => event.type === 'weight')
+  const pushablePendingEvents = hasWeightColumn
+    ? pendingEvents
+    : pendingEvents.filter((event) => event.type !== 'weight')
 
-  if (pendingEvents.length > 0) {
+  if (weightEventsWaitingForMigration.length > 0) {
+    await markEventsSyncError(
+      weightEventsWaitingForMigration.map((event) => event.clientId),
+    )
+  }
+
+  if (pushablePendingEvents.length > 0) {
     const { syncedEvents, failedMessages } = await pushLocalEvents(
       supabase,
-      pendingEvents,
+      pushablePendingEvents,
       userId,
     )
 
@@ -235,35 +336,26 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
     }
   }
 
-  const pullQuery = supabase
-    .from('baby_events')
-    .select(
-      'id, user_id, client_id, type, weight_kg, timestamp, created_at, updated_at, deleted_at',
-    )
-    .order('updated_at', { ascending: true })
+  const remoteEvents = await pullRemoteEvents(supabase, hasWeightColumn)
 
-  const { data: remoteEvents, error: pullError } =
-    await pullQuery.returns<RemoteBabyEvent[]>()
-
-  if (pullError) {
-    throw pullError
-  }
-
-  await upsertRemoteEvents((remoteEvents ?? []).map(fromRemoteEvent))
+  await upsertRemoteEvents(remoteEvents.map(fromRemoteEvent))
 
   const remoteClientIds = new Set(
-    (remoteEvents ?? []).map((event) => event.client_id),
+    remoteEvents.map((event) => event.client_id),
   )
   const currentLocalEvents = await getAllEvents()
   const missingRemoteEvents = currentLocalEvents.filter(
     (event) =>
       event.syncStatus === 'synced' && !remoteClientIds.has(event.clientId),
   )
+  const pushableMissingRemoteEvents = hasWeightColumn
+    ? missingRemoteEvents
+    : missingRemoteEvents.filter((event) => event.type !== 'weight')
 
-  if (missingRemoteEvents.length > 0) {
+  if (pushableMissingRemoteEvents.length > 0) {
     const { syncedEvents, failedMessages } = await pushLocalEvents(
       supabase,
-      missingRemoteEvents,
+      pushableMissingRemoteEvents,
       userId,
     )
 
@@ -278,10 +370,17 @@ export async function syncEvents(userId: string): Promise<SyncResult> {
   const syncedAt = new Date().toISOString()
   setLastSyncAt(syncedAt)
 
+  const pending = await getPendingEventCount()
+  const warning =
+    weightEventsWaitingForMigration.length > 0
+      ? `有 ${weightEventsWaitingForMigration.length} 条体重记录尚未同步：请先在 Supabase SQL Editor 重新执行 supabase-schema.sql`
+      : undefined
+
   return {
     pushed,
-    pulled: remoteEvents?.length ?? 0,
-    pending: await getPendingEventCount(),
+    pulled: remoteEvents.length,
+    pending,
     syncedAt,
+    warning,
   }
 }
