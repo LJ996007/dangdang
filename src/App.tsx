@@ -64,6 +64,7 @@ import {
   getLastFeed,
   getLatestWeight,
   getSevenDaySleep,
+  getTimelineWindowStats,
   getWeightTrend,
   isValidWeightKg,
   parseDateInput,
@@ -90,6 +91,9 @@ const tabs: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
   { id: 'analysis', label: '分析', Icon: BarChart3 },
   { id: 'data', label: '数据', Icon: Database },
 ]
+
+const chartMargin = { top: 8, right: 8, bottom: 0, left: 2 }
+const chartAxisTick = { fill: '#62716e', fontSize: 12 }
 
 const eventLabels: Record<BabyEventType, string> = {
   sleep_start: '睡觉开始',
@@ -309,15 +313,61 @@ function WeightRecorder({
 }
 
 function Timeline({
-  stats,
+  scrollKey,
+  scrollTarget,
+  timeline,
 }: {
-  stats: ReturnType<typeof getDayStats>
+  scrollKey: string
+  scrollTarget: 'focus-start' | 'now'
+  timeline: ReturnType<typeof getTimelineWindowStats>
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const scrollStateRef = useRef({ scrollTarget, timeline })
+  const timelineWidth = Math.max(Math.round(timeline.hours * 28), 1020)
+
+  useEffect(() => {
+    scrollStateRef.current = { scrollTarget, timeline }
+  }, [scrollTarget, timeline])
+
+  useEffect(() => {
+    const scroller = scrollerRef.current
+
+    if (!scroller) {
+      return
+    }
+
+    const { scrollTarget: targetMode, timeline: currentTimeline } =
+      scrollStateRef.current
+    const scrollableWidth = scroller.scrollWidth - scroller.clientWidth
+
+    if (scrollableWidth <= 0) {
+      scroller.scrollLeft = 0
+      return
+    }
+
+    const targetLeft =
+      targetMode === 'now' && currentTimeline.nowLeft != null
+        ? currentTimeline.nowLeft
+        : currentTimeline.focusLeft
+    const targetPixel = (targetLeft / 100) * scroller.scrollWidth
+    const offset = targetMode === 'now' ? scroller.clientWidth * 0.62 : 12
+    scroller.scrollLeft = Math.max(
+      0,
+      Math.min(scrollableWidth, targetPixel - offset),
+    )
+  }, [scrollKey])
+
   return (
-    <section className="timeline-panel" aria-label="今日24小时记录时间轴">
+    <section
+      className="timeline-panel"
+      aria-label={`${format(timeline.start, 'MM月dd日')}至${format(
+        timeline.end,
+        'MM月dd日',
+      )}连续记录时间轴`}
+    >
       <div className="section-title">
         <Clock3 aria-hidden="true" size={18} />
-        <h2>{format(stats.date, 'MM月dd日')} 时间轴</h2>
+        <h2>{format(timeline.centerDate, 'MM月dd日')} 时间轴</h2>
         <div className="timeline-legend" aria-label="时间轴图例">
           <span>
             <i className="legend-sleep" />
@@ -337,59 +387,75 @@ function Timeline({
           </span>
         </div>
       </div>
-      <div className="timeline">
-        <div className="timeline-track">
-          {stats.sleepSegments.map((segment, index) => (
-            <span
-              className={`sleep-segment ${segment.active ? 'active' : ''}`}
-              key={`${segment.startLabel}-${segment.endLabel}-${index}`}
-              style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
-              title={`${segment.startLabel}-${segment.endLabel} ${formatDuration(
-                segment.minutes,
-              )}`}
-            />
-          ))}
-          {stats.feedSegments.map((segment, index) => (
-            <span
-              className={`feed-segment ${segment.active ? 'active' : ''}`}
-              key={`feed-segment-${segment.startLabel}-${segment.endLabel}-${index}`}
-              style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
-              title={`吃奶 ${segment.startLabel}-${segment.endLabel} ${formatDuration(
-                segment.minutes,
-              )}`}
-            />
-          ))}
-          {stats.feedMarkers.map((marker, index) => (
-            <span
-              className="event-marker feed-marker"
-              key={`${marker.label}-${index}`}
-              style={{ left: `${marker.left}%` }}
-              title={`吃奶 ${marker.label}`}
-            />
-          ))}
-          {stats.poopMarkers.map((marker, index) => (
-            <span
-              className="event-marker poop-marker"
-              key={`poop-${marker.label}-${index}`}
-              style={{ left: `${marker.left}%` }}
-              title={`便便 ${marker.label}`}
-            />
-          ))}
-          {stats.peeMarkers.map((marker, index) => (
-            <span
-              className="event-marker pee-marker"
-              key={`pee-${marker.label}-${index}`}
-              style={{ left: `${marker.left}%` }}
-              title={`尿泡 ${marker.label}`}
-            />
-          ))}
-        </div>
-        <div className="timeline-scale" aria-hidden="true">
-          <span>00</span>
-          <span>06</span>
-          <span>12</span>
-          <span>18</span>
-          <span>24</span>
+      <div ref={scrollerRef} className="timeline" tabIndex={0}>
+        <div className="timeline-strip" style={{ width: timelineWidth }}>
+          <div className="timeline-track">
+            {timeline.ticks.map((tick, index) => (
+              <span
+                aria-hidden="true"
+                className={`timeline-grid-line ${
+                  tick.isDayStart ? 'day-start' : ''
+                }`}
+                key={`grid-${tick.label}-${index}`}
+                style={{ left: `${tick.left}%` }}
+              />
+            ))}
+            {timeline.sleepSegments.map((segment, index) => (
+              <span
+                className={`sleep-segment ${segment.active ? 'active' : ''}`}
+                key={`${segment.startLabel}-${segment.endLabel}-${index}`}
+                style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
+                title={`${segment.startLabel}-${segment.endLabel} ${formatDuration(
+                  segment.minutes,
+                )}`}
+              />
+            ))}
+            {timeline.feedSegments.map((segment, index) => (
+              <span
+                className={`feed-segment ${segment.active ? 'active' : ''}`}
+                key={`feed-segment-${segment.startLabel}-${segment.endLabel}-${index}`}
+                style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
+                title={`吃奶 ${segment.startLabel}-${segment.endLabel} ${formatDuration(
+                  segment.minutes,
+                )}`}
+              />
+            ))}
+            {timeline.feedMarkers.map((marker, index) => (
+              <span
+                className="event-marker feed-marker"
+                key={`${marker.label}-${index}`}
+                style={{ left: `${marker.left}%` }}
+                title={`吃奶 ${marker.label}`}
+              />
+            ))}
+            {timeline.poopMarkers.map((marker, index) => (
+              <span
+                className="event-marker poop-marker"
+                key={`poop-${marker.label}-${index}`}
+                style={{ left: `${marker.left}%` }}
+                title={`便便 ${marker.label}`}
+              />
+            ))}
+            {timeline.peeMarkers.map((marker, index) => (
+              <span
+                className="event-marker pee-marker"
+                key={`pee-${marker.label}-${index}`}
+                style={{ left: `${marker.left}%` }}
+                title={`尿泡 ${marker.label}`}
+              />
+            ))}
+          </div>
+          <div className="timeline-scale" aria-hidden="true">
+            {timeline.ticks.map((tick, index) => (
+              <span
+                className={tick.isDayStart ? 'day-tick' : undefined}
+                key={`scale-${tick.label}-${index}`}
+                style={{ left: `${tick.left}%` }}
+              >
+                {tick.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -930,8 +996,16 @@ function App() {
     () => getDayStats(events, selectedDay, now),
     [events, now, selectedDay],
   )
+  const dayTimeline = useMemo(
+    () => getTimelineWindowStats(events, selectedDay, now),
+    [events, now, selectedDay],
+  )
   const todayStats = useMemo(
     () => getDayStats(events, now, now),
+    [events, now],
+  )
+  const todayTimeline = useMemo(
+    () => getTimelineWindowStats(events, now, now),
     [events, now],
   )
   const sevenDaySleep = useMemo(
@@ -1348,7 +1422,11 @@ function App() {
             </article>
           </div>
 
-          <Timeline stats={todayStats} />
+          <Timeline
+            scrollKey={format(todayTimeline.centerDate, 'yyyy-MM-dd')}
+            scrollTarget="now"
+            timeline={todayTimeline}
+          />
 
           <section className="insight-row">
             <article>
@@ -1447,7 +1525,11 @@ function App() {
             </article>
           </div>
 
-          <Timeline stats={dayStats} />
+          <Timeline
+            scrollKey={selectedDate}
+            scrollTarget="focus-start"
+            timeline={dayTimeline}
+          />
 
           <section className="chart-panel">
             <div className="section-title">
@@ -1456,10 +1538,16 @@ function App() {
             </div>
             {dayStats.feedIntervals.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={dayStats.feedIntervals} margin={{ left: -18, right: 8 }}>
+                <LineChart data={dayStats.feedIntervals} margin={chartMargin}>
                   <CartesianGrid stroke="#e8efed" strokeDasharray="4 4" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={chartAxisTick}
+                    tickLine={false}
+                    axisLine={false}
+                  />
                   <YAxis
+                    tick={chartAxisTick}
                     tickLine={false}
                     axisLine={false}
                     unit="分"
@@ -1493,10 +1581,21 @@ function App() {
               <h2>近7天睡眠总时长</h2>
             </div>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={sevenDaySleep} margin={{ left: -18, right: 8 }}>
+              <BarChart data={sevenDaySleep} margin={chartMargin}>
                 <CartesianGrid stroke="#e8efed" strokeDasharray="4 4" />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} unit="h" width={52} />
+                <XAxis
+                  dataKey="label"
+                  tick={chartAxisTick}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  tick={chartAxisTick}
+                  tickLine={false}
+                  axisLine={false}
+                  unit="h"
+                  width={52}
+                />
                 <Tooltip formatter={(value) => [`${value}小时`, '睡眠']} />
                 <Bar dataKey="hours" fill="#61b7a6" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -1510,10 +1609,16 @@ function App() {
             </div>
             {weightTrend.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={weightTrend} margin={{ left: -18, right: 8 }}>
+                <LineChart data={weightTrend} margin={chartMargin}>
                   <CartesianGrid stroke="#e8efed" strokeDasharray="4 4" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={chartAxisTick}
+                    tickLine={false}
+                    axisLine={false}
+                  />
                   <YAxis
+                    tick={chartAxisTick}
                     tickLine={false}
                     axisLine={false}
                     unit="kg"

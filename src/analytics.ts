@@ -34,6 +34,29 @@ export interface FeedMarker {
   label: string
 }
 
+export interface TimelineTick {
+  left: number
+  label: string
+  isDayStart: boolean
+}
+
+export interface TimelineWindowStats {
+  centerDate: Date
+  start: Date
+  end: Date
+  focusStart: Date
+  focusEnd: Date
+  hours: number
+  focusLeft: number
+  nowLeft: number | null
+  ticks: TimelineTick[]
+  feedMarkers: FeedMarker[]
+  poopMarkers: FeedMarker[]
+  peeMarkers: FeedMarker[]
+  sleepSegments: SleepSegment[]
+  feedSegments: TimelineSegment[]
+}
+
 export interface IntervalPoint {
   label: string
   minutes: number
@@ -287,6 +310,106 @@ export function getDayStats(
     totalSleepMinutes,
     totalFeedMinutes,
     averageFeedIntervalMinutes,
+  }
+}
+
+export function getTimelineWindowStats(
+  events: BabyEvent[],
+  centerDate: Date,
+  now = new Date(),
+): TimelineWindowStats {
+  const centerStart = startOfDay(centerDate)
+  const start = subDays(centerStart, 1)
+  const end = addDays(centerStart, 2)
+  const startMs = start.getTime()
+  const endMs = end.getTime()
+  const totalMinutes = (endMs - startMs) / 60000
+
+  const toLeft = (timestamp: Date) =>
+    ((timestamp.getTime() - startMs) / (endMs - startMs)) * 100
+
+  const isInWindow = (event: BabyEvent) => {
+    const timestamp = new Date(event.timestamp).getTime()
+    return timestamp >= startMs && timestamp < endMs
+  }
+
+  const toMarker = (event: BabyEvent) => {
+    const timestamp = new Date(event.timestamp)
+    return {
+      left: toLeft(timestamp),
+      label: format(timestamp, 'MM/dd HH:mm'),
+    }
+  }
+
+  const toTimelineSegment = (session: ActivitySession) => {
+    const clippedStart = new Date(Math.max(session.start.getTime(), startMs))
+    const clippedEnd = new Date(Math.min(session.end.getTime(), endMs))
+
+    if (!isBefore(clippedStart, clippedEnd)) {
+      return null
+    }
+
+    const durationMinutes =
+      (clippedEnd.getTime() - clippedStart.getTime()) / 60000
+
+    return {
+      left: toLeft(clippedStart),
+      width: Math.max((durationMinutes / totalMinutes) * 100, 0.28),
+      startLabel: format(clippedStart, 'MM/dd HH:mm'),
+      endLabel: format(clippedEnd, 'MM/dd HH:mm'),
+      minutes: Math.round(durationMinutes),
+      active: !session.complete,
+    }
+  }
+
+  const windowEvents = sortEvents(events).filter(isInWindow)
+  const feedMarkers = windowEvents
+    .filter((event) => event.type === 'feed')
+    .map(toMarker)
+  const poopMarkers = windowEvents
+    .filter((event) => event.type === 'poop')
+    .map(toMarker)
+  const peeMarkers = windowEvents
+    .filter((event) => event.type === 'pee')
+    .map(toMarker)
+  const sleepSegments = buildSleepSessions(events, now)
+    .map(toTimelineSegment)
+    .filter((segment): segment is SleepSegment => Boolean(segment))
+  const feedSegments = buildFeedSessions(events, now)
+    .map((session) => {
+      const segment = toTimelineSegment(session)
+      return segment ? { ...segment, width: Math.max(segment.width, 0.36) } : null
+    })
+    .filter((segment): segment is TimelineSegment => Boolean(segment))
+
+  const ticks = Array.from({ length: 13 }, (_, index) => {
+    const tickDate = new Date(startMs + index * 6 * 60 * 60000)
+    const isDayStart = tickDate.getHours() === 0
+    return {
+      left: toLeft(tickDate),
+      label: isDayStart ? `${format(tickDate, 'MM/dd')} 00` : format(tickDate, 'HH'),
+      isDayStart,
+    }
+  })
+
+  const nowLeft =
+    now.getTime() >= startMs && now.getTime() < endMs ? toLeft(now) : null
+
+  return {
+    centerDate: centerStart,
+    start,
+    end,
+    focusStart: centerStart,
+    focusEnd: addDays(centerStart, 1),
+    hours: totalMinutes / 60,
+    focusLeft: toLeft(centerStart),
+    nowLeft,
+    ticks,
+    feedMarkers,
+    poopMarkers,
+    peeMarkers,
+    sleepSegments,
+    feedSegments,
   }
 }
 

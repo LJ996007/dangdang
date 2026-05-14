@@ -586,27 +586,57 @@ p {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.timeline:focus-visible {
+  outline: 2px solid rgba(44, 139, 124, 0.32);
+  outline-offset: 3px;
+}
+
+.timeline::-webkit-scrollbar {
+  height: 6px;
+}
+
+.timeline::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(44, 139, 124, 0.24);
+}
+
+.timeline-strip {
+  min-width: 100%;
 }
 
 .timeline-track {
   position: relative;
-  height: 42px;
+  height: 48px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(97, 183, 166, 0.12) 0,
-      rgba(97, 183, 166, 0.12) 1px,
-      transparent 1px,
-      transparent 25%
-    ),
-    var(--surface);
+  background: var(--surface);
+}
+
+.timeline-grid-line {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(97, 183, 166, 0.14);
+}
+
+.timeline-grid-line.day-start {
+  background: rgba(44, 139, 124, 0.24);
 }
 
 .sleep-segment {
   position: absolute;
+  z-index: 1;
   top: 8px;
   bottom: 8px;
   min-width: 5px;
@@ -620,6 +650,7 @@ p {
 
 .feed-segment {
   position: absolute;
+  z-index: 1;
   top: 14px;
   bottom: 14px;
   min-width: 5px;
@@ -633,6 +664,7 @@ p {
 
 .event-marker {
   position: absolute;
+  z-index: 2;
   width: 12px;
   height: 12px;
   border: 2px solid #fff;
@@ -659,10 +691,31 @@ p {
 }
 
 .timeline-scale {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 16px;
+  min-width: 100%;
   color: var(--subtle);
   font-size: 11px;
+}
+
+.timeline-scale span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.timeline-scale span:first-child {
+  transform: translateX(0);
+}
+
+.timeline-scale span:last-child {
+  transform: translateX(-100%);
+}
+
+.timeline-scale .day-tick {
+  color: var(--muted);
+  font-weight: 720;
 }
 
 .insight-row {
@@ -1005,6 +1058,11 @@ p {
   min-height: 292px;
 }
 
+.chart-panel .recharts-cartesian-axis-tick-value {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
 .recharts-default-tooltip {
   border: 1px solid var(--line) !important;
   border-radius: 8px !important;
@@ -1216,6 +1274,14 @@ p {
 
   .sync-grid {
     grid-template-columns: 1fr;
+  }
+
+  .timeline-scale {
+    font-size: 10px;
+  }
+
+  .chart-panel .recharts-cartesian-axis-tick-value {
+    font-size: 11px;
   }
 }
 
