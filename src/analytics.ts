@@ -72,6 +72,7 @@ export interface WeightPoint {
 export interface DayStats {
   date: Date
   feedEvents: BabyEvent[]
+  pumpEvents: BabyEvent[]
   poopEvents: BabyEvent[]
   peeEvents: BabyEvent[]
   weightEvents: BabyEvent[]
@@ -231,6 +232,7 @@ export function getDayStats(
   const feedEvents = dayEvents.filter(
     (event) => event.type === 'feed' || event.type === 'feed_start',
   )
+  const pumpEvents = dayEvents.filter((event) => event.type === 'pump')
   const legacyFeedEvents = dayEvents.filter((event) => event.type === 'feed')
   const poopEvents = dayEvents.filter((event) => event.type === 'poop')
   const peeEvents = dayEvents.filter((event) => event.type === 'pee')
@@ -314,6 +316,7 @@ export function getDayStats(
   return {
     date,
     feedEvents,
+    pumpEvents,
     poopEvents,
     peeEvents,
     weightEvents,
@@ -449,6 +452,12 @@ export function getLastFeed(events: BabyEvent[]) {
     .at(-1)
 }
 
+export function getLastPump(events: BabyEvent[]) {
+  return sortEvents(events)
+    .filter((event) => event.type === 'pump')
+    .at(-1)
+}
+
 export function getLastCompletedSleep(events: BabyEvent[], now = new Date()) {
   return buildSleepSessions(events, now)
     .filter((session) => session.complete)
@@ -504,6 +513,7 @@ export function getCsvRows(events: BabyEvent[]) {
     feed: '吃奶',
     feed_start: '吃奶开始',
     feed_end: '吃奶结束',
+    pump: '吸奶',
     poop: '便便',
     pee: '尿泡',
     weight: '体重',

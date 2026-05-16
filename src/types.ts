@@ -4,6 +4,7 @@ export type BabyEventType =
   | 'feed'
   | 'feed_start'
   | 'feed_end'
+  | 'pump'
   | 'poop'
   | 'pee'
   | 'weight'

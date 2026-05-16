@@ -9,6 +9,7 @@ create table if not exists public.baby_events (
       'feed',
       'feed_start',
       'feed_end',
+      'pump',
       'poop',
       'pee',
       'weight'
@@ -54,6 +55,7 @@ alter table public.baby_events
       'feed',
       'feed_start',
       'feed_end',
+      'pump',
       'poop',
       'pee',
       'weight'

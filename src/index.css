@@ -350,6 +350,12 @@ p {
   background: #ffe7e2;
 }
 
+.quick-action.pump {
+  min-height: 104px;
+  background: #fff0ed;
+  color: var(--coral-dark);
+}
+
 .quick-action.poop {
   background: #fff6e5;
   color: var(--poop-dark);
@@ -793,6 +799,11 @@ p {
 }
 
 .event-icon.feed {
+  background: #fff0ed;
+  color: var(--coral-dark);
+}
+
+.event-icon.pump {
   background: #fff0ed;
   color: var(--coral-dark);
 }

@@ -62,6 +62,7 @@ import {
   getExportFileStamp,
   getLastCompletedSleep,
   getLastFeed,
+  getLastPump,
   getLatestWeight,
   getSevenDaySleep,
   getTimelineWindowStats,
@@ -112,6 +113,7 @@ const eventLabels: Record<BabyEventType, string> = {
   feed: '吃奶',
   feed_start: '吃奶开始',
   feed_end: '吃奶结束',
+  pump: '吸奶',
   poop: '便便',
   pee: '尿泡',
   weight: '体重',
@@ -123,13 +125,19 @@ const eventTone: Record<BabyEventType, string> = {
   feed: 'feed',
   feed_start: 'feed',
   feed_end: 'feed',
+  pump: 'pump',
   poop: 'poop',
   pee: 'pee',
   weight: 'weight',
 }
 
 function getEventIcon(type: BabyEventType) {
-  if (type === 'feed' || type === 'feed_start' || type === 'feed_end') {
+  if (
+    type === 'feed' ||
+    type === 'feed_start' ||
+    type === 'feed_end' ||
+    type === 'pump'
+  ) {
     return Milk
   }
 
@@ -181,6 +189,7 @@ function isBabyEvent(value: unknown): value is BabyEvent {
       type === 'feed' ||
       type === 'feed_start' ||
       type === 'feed_end' ||
+      type === 'pump' ||
       type === 'poop' ||
       type === 'pee' ||
       type === 'weight') &&
@@ -1101,6 +1110,7 @@ function App() {
     [events],
   )
   const lastFeed = useMemo(() => getLastFeed(events), [events])
+  const lastPump = useMemo(() => getLastPump(events), [events])
   const lastSleep = useMemo(
     () => getLastCompletedSleep(events, now),
     [events, now],
@@ -1197,6 +1207,12 @@ function App() {
   const handleFeedEnd = async () => {
     await addEvent('feed_end')
     setNotice('已记录吃奶结束时间')
+    await finishLocalChange()
+  }
+
+  const handlePump = async () => {
+    await addEvent('pump')
+    setNotice('已记录吸奶时间')
     await finishLocalChange()
   }
 
@@ -1333,6 +1349,7 @@ function App() {
   }
 
   const lastFeedTime = lastFeed ? new Date(lastFeed.timestamp) : null
+  const lastPumpTime = lastPump ? new Date(lastPump.timestamp) : null
   const currentSleepDuration = currentSleepStart
     ? formatDuration(Math.max(0, Math.round((now.getTime() - currentSleepStart.getTime()) / 60000)))
     : null
@@ -1466,6 +1483,14 @@ function App() {
             </button>
           </div>
 
+          <button className="quick-action pump" type="button" onClick={handlePump}>
+            <Milk aria-hidden="true" size={30} />
+            <span>吸奶</span>
+            <small>
+              {lastPumpTime ? `距上次 ${formatSince(lastPumpTime, now)}` : '暂无记录'}
+            </small>
+          </button>
+
           <WeightRecorder
             latestWeights={{
               baby: latestBabyWeight,
@@ -1490,6 +1515,10 @@ function App() {
             <article className="metric">
               <span>吃奶次数</span>
               <strong>{todayStats.feedEvents.length}</strong>
+            </article>
+            <article className="metric">
+              <span>吸奶次数</span>
+              <strong>{todayStats.pumpEvents.length}</strong>
             </article>
             <article className="metric">
               <span>吃奶总时长</span>
@@ -1589,6 +1618,10 @@ function App() {
             <article className="metric">
               <span>吃奶次数</span>
               <strong>{dayStats.feedEvents.length}</strong>
+            </article>
+            <article className="metric">
+              <span>吸奶次数</span>
+              <strong>{dayStats.pumpEvents.length}</strong>
             </article>
             <article className="metric">
               <span>吃奶总时长</span>
@@ -1873,6 +1906,10 @@ function App() {
                     ).length
                   }
                 </strong>
+              </article>
+              <article className="metric">
+                <span>吸奶</span>
+                <strong>{events.filter((event) => event.type === 'pump').length}</strong>
               </article>
               <article className="metric">
                 <span>便便</span>
